@@ -1,0 +1,175 @@
+import { DocumentStatus, PrismaClient } from "@prisma/client";
+import {
+  AuthorizationError,
+  authorizationErrorResponse,
+  ForbiddenError,
+  requirePermission,
+} from "@/lib/authorization";
+import { createAuditLog } from "@/lib/audit-log";
+import {
+  DOCUMENTS_BUCKET,
+  getStorageProvider,
+} from "@/lib/storage";
+import { verifyDocumentSchema } from "@/schemas/document";
+import { documentSelect } from "@/app/api/documents/route";
+
+const prisma = new PrismaClient();
+
+export async function GET(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const authenticatedUser = await requirePermission("document:read");
+    const { id } = await params;
+
+    const document = await prisma.document.findUnique({
+      where: { id },
+      select: documentSelect,
+    });
+
+    if (!document) {
+      return Response.json(
+        { message: "Document not found." },
+        { status: 404 }
+      );
+    }
+
+    if (authenticatedUser.role === "STUDENT") {
+      if (document.student.userId !== authenticatedUser.id) {
+        throw new ForbiddenError();
+      }
+    }
+
+    // Generate short-lived signed URL for private access
+    const storage = getStorageProvider();
+    const signedUrl = await storage.createSignedUrl({
+      bucket: DOCUMENTS_BUCKET,
+      path: document.storagePath,
+      expiresIn: 900, // 15 minutes
+    });
+
+    return Response.json({ ...document, signedUrl }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("GET /api/documents/[id] error:", error);
+    return Response.json(
+      { message: "Internal server error." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function PATCH(
+  request: Request,
+  { params }: { params: Promise<{ id: string }> }
+) {
+  try {
+    const authenticatedUser = await requirePermission("document:verify");
+    const { id } = await params;
+
+    let body: unknown;
+    try {
+      body = await request.json();
+    } catch {
+      return Response.json(
+        { message: "Invalid JSON in request body." },
+        { status: 400 }
+      );
+    }
+
+    const parsed = verifyDocumentSchema.safeParse(body);
+    if (!parsed.success) {
+      return Response.json(
+        {
+          message: "Validation failed.",
+          errors: parsed.error.flatten().fieldErrors,
+        },
+        { status: 400 }
+      );
+    }
+
+    const existingDocument = await prisma.document.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        status: true,
+      },
+    });
+
+    if (!existingDocument) {
+      return Response.json(
+        { message: "Document not found." },
+        { status: 404 }
+      );
+    }
+
+    if (existingDocument.status !== DocumentStatus.PENDING) {
+      return Response.json(
+        {
+          message: `Cannot verify document with status ${existingDocument.status}. Only PENDING documents can be verified or rejected.`,
+        },
+        { status: 400 }
+      );
+    }
+
+    const now = new Date();
+    const isVerified = parsed.data.status === "VERIFIED";
+
+    const updateData = isVerified
+      ? {
+          status: DocumentStatus.VERIFIED,
+          verifiedById: authenticatedUser.id,
+          verifiedAt: now,
+          rejectionReason: null,
+        }
+      : {
+          status: DocumentStatus.REJECTED,
+          verifiedById: authenticatedUser.id,
+          verifiedAt: now,
+          rejectionReason: parsed.data.rejectionReason!.trim(),
+        };
+
+    const updatedDocument = await prisma.$transaction(async (tx) => {
+      const doc = await tx.document.update({
+        where: { id },
+        data: updateData,
+        select: documentSelect,
+      });
+
+      await createAuditLog(tx, authenticatedUser, {
+        action: isVerified ? "VERIFY" : "REJECT",
+        entity: "Document",
+        entityId: doc.id,
+        changes: {
+          status: doc.status,
+          verifiedById: doc.verifiedById,
+          verifiedAt: doc.verifiedAt,
+          rejectionReason: doc.rejectionReason,
+        },
+      });
+
+      return doc;
+    });
+
+    return Response.json(updatedDocument, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("PATCH /api/documents/[id] error:", error);
+    return Response.json(
+      { message: "Internal server error." },
+      { status: 500 }
+    );
+  }
+}
+
+export async function DELETE() {
+  return Response.json(
+    { message: "Method Not Allowed. Document deletion is not permitted." },
+    { status: 405, headers: { Allow: "GET, PATCH" } }
+  );
+}

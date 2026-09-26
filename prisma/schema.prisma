@@ -1,0 +1,571 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// ENUMS
+// ============================================================================
+
+enum AttendanceStatus {
+  PRESENT
+  LATE
+  ABSENT
+}
+
+enum AbsenceType {
+  SICK
+  PERMITTED
+  UNEXCUSED
+}
+
+enum DocumentStatus {
+  PENDING
+  VERIFIED
+  REJECTED
+  EXPIRED
+}
+
+enum ApplicationStatus {
+  APPLIED
+  SCREENING
+  INTERVIEW
+  SELECTED
+  REJECTED
+  WITHDRAWN
+}
+
+enum InterviewStatus {
+  PENDING
+  PASSED
+  FAILED
+  RESCHEDULED
+}
+
+enum PlacementStatus {
+  PREPARATION
+  READY
+  DEPARTED
+  PLACED
+  CANCELLED
+}
+
+enum EnrollmentStatus {
+  ACTIVE
+  COMPLETED
+  TRANSFERRED
+  DROPPED
+}
+
+enum ClassStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum ScheduleStatus {
+  SCHEDULED
+  COMPLETED
+  CANCELLED
+}
+
+enum AssessmentType {
+  ASSIGNMENT
+  PRACTICAL
+  EXAM
+  INTERVIEW
+  OTHER
+}
+
+enum AssessmentSessionStatus {
+  OPEN
+  COMPLETED
+}
+
+enum CertificateStatus {
+  ACTIVE
+  REVOKED
+}
+
+// ============================================================================
+// RBAC & USERS
+// ============================================================================
+
+model User {
+  id           String  @id @default(cuid())
+  email        String  @unique
+  passwordHash String
+  name         String?
+
+  roleId String
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  student    Student? // Nullable, one-to-one relation
+  instructor Instructor? // Nullable, one-to-one relation
+
+  // Relations for instructing/verifying
+  verifiedDocuments Document[] @relation("DocumentVerifier")
+  auditLogs         AuditLog[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  deletedAt DateTime? // Soft delete if necessary
+
+  @@map("users")
+}
+
+model Role {
+  id          String  @id @default(cuid())
+  name        String  @unique
+  description String?
+
+  users       User[]
+  permissions RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("roles")
+}
+
+model Permission {
+  id          String  @id @default(cuid())
+  name        String  @unique // e.g., "create:student"
+  action      String // e.g., "create", "read", "update", "delete"
+  subject     String // e.g., "student", "class"
+  description String?
+
+  roles RolePermission[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("permissions")
+}
+
+model RolePermission {
+  roleId       String
+  permissionId String
+
+  role       Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) // Junction-only record; no independent update lifecycle.
+
+  @@id([roleId, permissionId])
+  @@map("role_permissions")
+}
+
+// ============================================================================
+// ACADEMIC CORE
+// ============================================================================
+
+model Program {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  description String?
+
+  subjects     ProgramSubject[]
+  batches      Batch[]
+  certificates Certificate[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("programs")
+}
+
+model Subject {
+  id          String  @id @default(cuid())
+  code        String  @unique
+  name        String
+  description String?
+
+  programs    ProgramSubject[]
+  assessments Assessment[]
+  schedules   Schedule[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("subjects")
+}
+
+model ProgramSubject {
+  programId String
+  subjectId String
+
+  program Program @relation(fields: [programId], references: [id], onDelete: Cascade)
+  subject Subject @relation(fields: [subjectId], references: [id], onDelete: Cascade)
+
+  createdAt DateTime @default(now()) // Junction-only record; no independent update lifecycle.
+
+  @@id([programId, subjectId])
+  @@map("program_subjects")
+}
+
+model Batch {
+  id        String    @id @default(cuid())
+  name      String
+  programId String
+  program   Program   @relation(fields: [programId], references: [id])
+  startDate DateTime
+  endDate   DateTime?
+
+  enrollments  Enrollment[]
+  classes      Class[]
+  certificates Certificate[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("batches")
+}
+
+model Instructor {
+  id     String  @id @default(cuid())
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id])
+
+  name String
+
+  classes   Class[]
+  schedules Schedule[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("instructors")
+}
+
+model Class {
+  id           String      @id @default(cuid())
+  name         String
+  batchId      String
+  batch        Batch       @relation(fields: [batchId], references: [id])
+  instructorId String
+  instructor   Instructor  @relation(fields: [instructorId], references: [id])
+  status       ClassStatus @default(SCHEDULED)
+
+  schedules   Schedule[]
+  assessments Assessment[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("classes")
+}
+
+// ============================================================================
+// STUDENTS & ENROLLMENTS
+// ============================================================================
+
+model Student {
+  id     String  @id @default(cuid())
+  userId String? @unique
+  user   User?   @relation(fields: [userId], references: [id])
+
+  nim     String  @unique
+  nik     String? @unique
+  name    String
+  phone   String?
+  address String?
+
+  enrollments  Enrollment[]
+  attendances  Attendance[]
+  scores       AssessmentScore[]
+  documents    Document[]
+  applications Application[]
+  placements   Placement[]
+  certificates Certificate[]
+
+  createdAt DateTime  @default(now())
+  updatedAt DateTime  @updatedAt
+  deletedAt DateTime? // Student deletion must go through a service/business rule; historical records must remain.
+
+  @@map("students")
+}
+
+model Enrollment {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+  batchId   String
+  batch     Batch   @relation(fields: [batchId], references: [id])
+
+  status EnrollmentStatus @default(ACTIVE)
+  notes  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("enrollments")
+}
+
+// ============================================================================
+// SCHEDULES & ATTENDANCES
+// ============================================================================
+
+model Schedule {
+  id           String  @id @default(cuid())
+  classId      String
+  class        Class   @relation(fields: [classId], references: [id])
+  subjectId    String
+  subject      Subject @relation(fields: [subjectId], references: [id])
+  instructorId String
+  instructor   Instructor @relation(fields: [instructorId], references: [id])
+
+  date      DateTime
+  startTime DateTime
+  endTime   DateTime
+  room      String?
+  dressCode String?
+  topic     String?
+  status    ScheduleStatus @default(SCHEDULED)
+
+  attendances Attendance[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("schedules")
+}
+
+model Attendance {
+  id         String           @id @default(cuid())
+  scheduleId String
+  schedule   Schedule         @relation(fields: [scheduleId], references: [id])
+  studentId  String
+  student    Student          @relation(fields: [studentId], references: [id])
+  status     AttendanceStatus
+  absenceType AbsenceType?
+  lateMinutes Int?
+  notes      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([scheduleId, studentId]) // PRD: Tidak boleh ada duplicate attendance
+  @@map("attendances")
+}
+
+// ============================================================================
+// ASSESSMENTS
+// ============================================================================
+
+model Assessment {
+  id          String                  @id @default(cuid())
+  classId     String
+  class       Class                   @relation(fields: [classId], references: [id])
+  subjectId   String
+  subject     Subject                 @relation(fields: [subjectId], references: [id])
+  name        String
+  description String?
+  type        AssessmentType
+  maxScore    Float
+  status      AssessmentSessionStatus @default(OPEN)
+
+  scores AssessmentScore[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("assessments")
+}
+
+model AssessmentScore {
+  id           String     @id @default(cuid())
+  assessmentId String
+  assessment   Assessment @relation(fields: [assessmentId], references: [id])
+  studentId    String
+  student      Student    @relation(fields: [studentId], references: [id])
+  score        Float?
+  feedback     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([assessmentId, studentId]) // PRD: Satu student hanya memiliki satu score untuk satu assessment
+  @@map("assessment_scores")
+}
+
+// ============================================================================
+// DOCUMENTS
+// ============================================================================
+
+model Document {
+  id          String  @id @default(cuid())
+  studentId   String
+  student     Student @relation(fields: [studentId], references: [id])
+  type        String // e.g., KTP, IJAZAH, CV
+  storagePath String // External storage path; file content is not stored in PostgreSQL.
+  fileName    String
+  fileSize    Int
+  fileType    String
+
+  status          DocumentStatus @default(PENDING)
+  verifiedById    String?
+  verifiedBy      User?          @relation("DocumentVerifier", fields: [verifiedById], references: [id])
+  verifiedAt      DateTime?
+  rejectionReason String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId])
+  @@map("documents")
+}
+
+// ============================================================================
+// PLACEMENT & EMPLOYERS
+// ============================================================================
+
+model Employer {
+  id           String  @id @default(cuid())
+  name         String
+  companyInfo  String?
+  address      String?
+  contactName  String?
+  contactEmail String?
+  contactPhone String?
+
+  vacancies  Vacancy[]
+  placements Placement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("employers")
+}
+
+model Vacancy {
+  id           String   @id @default(cuid())
+  employerId   String
+  employer     Employer @relation(fields: [employerId], references: [id])
+  title        String
+  description  String
+  requirements String
+  status       String   @default("OPEN") // Status values remain TO BE VALIDATED by GHS.
+
+  applications Application[]
+  placements   Placement[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("vacancies")
+}
+
+model Application {
+  id        String            @id @default(cuid())
+  vacancyId String
+  vacancy   Vacancy           @relation(fields: [vacancyId], references: [id])
+  studentId String
+  student   Student           @relation(fields: [studentId], references: [id])
+  status    ApplicationStatus @default(APPLIED)
+  notes     String?
+
+  interviews Interview[]
+  placement  Placement?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([vacancyId])
+  @@map("applications")
+}
+
+model Interview {
+  id            String          @id @default(cuid())
+  applicationId String
+  application   Application     @relation(fields: [applicationId], references: [id])
+  scheduledAt   DateTime
+  method        String? // Interview method values remain TO BE VALIDATED by GHS.
+  location      String?
+  status        InterviewStatus @default(PENDING)
+  notes         String?
+  feedback      String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([applicationId])
+  @@map("interviews")
+}
+
+model Placement {
+  id            String       @id @default(cuid())
+  applicationId String?      @unique // Placements can originate from applications
+  application   Application? @relation(fields: [applicationId], references: [id])
+  studentId     String
+  student       Student      @relation(fields: [studentId], references: [id])
+  employerId    String
+  employer      Employer     @relation(fields: [employerId], references: [id])
+  vacancyId     String?
+  vacancy       Vacancy?     @relation(fields: [vacancyId], references: [id])
+
+  position  String
+  startDate DateTime?
+  status    PlacementStatus @default(PREPARATION)
+  notes     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([studentId])
+  @@index([employerId])
+  @@index([vacancyId])
+  @@map("placements")
+}
+
+// ============================================================================
+// CERTIFICATES
+// ============================================================================
+
+model Certificate {
+  id        String  @id @default(cuid())
+  studentId String
+  student   Student @relation(fields: [studentId], references: [id])
+  programId String
+  program   Program @relation(fields: [programId], references: [id])
+  batchId   String
+  batch     Batch   @relation(fields: [batchId], references: [id])
+
+  certificateNumber String            @unique // Format TO BE VALIDATED
+  issuedAt          DateTime
+  status            CertificateStatus @default(ACTIVE)
+  path              String? // External storage path; file content is not stored in PostgreSQL.
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("certificates")
+}
+
+// ============================================================================
+// AUDIT LOG
+// ============================================================================
+
+model AuditLog {
+  id       String  @id @default(cuid())
+  userId   String?
+  user     User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+  action   String // CREATE, UPDATE, DELETE
+  entity   String // e.g., 'Attendance', 'AssessmentScore'
+  entityId String
+  changes  Json // Storing old/new values
+
+  createdAt DateTime @default(now())
+  // No updatedAt because it's append-only
+
+  @@index([userId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}

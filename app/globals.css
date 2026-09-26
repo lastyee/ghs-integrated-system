@@ -1,26 +1,53 @@
 @import "tailwindcss";
 
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* GHS Official Brand Identity Tokens */
+  --ghs-yellow: #FFD618;
+  --ghs-red: #BF120E;
+  --ghs-white: #FFFFFF;
+  --ghs-dark: #1B1B1B;
+  --ghs-dark-secondary: #333333;
+  --ghs-border: #EEEEEE;
+  --ghs-bg-light: #F3F3F3;
+
+  --background: #F3F3F3;
+  --foreground: #1B1B1B;
 }
 
 @theme inline {
+  --color-ghs-yellow: #FFD618;
+  --color-ghs-red: #BF120E;
+  --color-ghs-white: #FFFFFF;
+  --color-ghs-dark: #1B1B1B;
+  --color-ghs-dark-secondary: #333333;
+  --color-ghs-border: #EEEEEE;
+  --color-ghs-bg-light: #F3F3F3;
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
-
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+  --font-sans: var(--font-sans), "Plus Jakarta Sans", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-mono: var(--font-geist-mono), monospace;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
 }
+
+/* GHS Global Design Helper Utilities */
+.bg-ghs-yellow { background-color: #FFD618; }
+.text-ghs-yellow { color: #FFD618; }
+.border-ghs-yellow { border-color: #FFD618; }
+
+.bg-ghs-red { background-color: #BF120E; }
+.text-ghs-red { color: #BF120E; }
+.border-ghs-red { border-color: #BF120E; }
+
+.bg-ghs-dark { background-color: #1B1B1B; }
+.text-ghs-dark { color: #1B1B1B; }
+.border-ghs-dark { border-color: #1B1B1B; }
+
+.bg-ghs-secondary { background-color: #333333; }
+.text-ghs-secondary { color: #333333; }
+
+.bg-ghs-light { background-color: #F3F3F3; }
+.border-ghs-border { border-color: #EEEEEE; }

@@ -1,17 +1,44 @@
 {
-  "name": "tmp_next",
+  "name": "ghs-integrated-system",
   "version": "0.1.0",
   "private": true,
   "scripts": {
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "prisma:validate": "prisma validate",
+    "prisma:seed": "node prisma/seed.js",
+    "test:program-create": "node scripts/test-program-create.mjs",
+    "test:subject-create": "node scripts/test-subject-create.mjs",
+    "test:batch-create": "node scripts/test-batch-create.mjs",
+    "test:class-read": "node scripts/test-class-read.mjs",
+    "test:class-create": "node scripts/test-class-create.mjs",
+    "test:schedule-read": "node scripts/test-schedule-read.mjs",
+    "test:schedule-create": "node scripts/test-schedule-create.mjs",
+    "test:attendance-schema": "node --experimental-strip-types scripts/test-attendance-schema.mjs",
+    "test:enrollments": "node scripts/test-enrollments.mjs",
+    "test:audit-pilot": "node scripts/test-audit-pilot.mjs",
+    "test:academic-read": "node scripts/test-academic-read.mjs",
+    "test:step67b-documents": "node scripts/test-step67b-documents.mjs",
+    "test:regression": "node scripts/run-all-regressions.mjs"
+  },
+  "prisma": {
+    "seed": "node prisma/seed.js"
   },
   "dependencies": {
+    "@prisma/client": "^5.22.0",
+    "@supabase/supabase-js": "^2.117.1",
+    "bcryptjs": "^3.0.3",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
+    "lucide-react": "^1.47.0",
     "next": "16.3.5",
+    "next-auth": "^5.0.0-beta.32",
     "react": "19.2.8",
-    "react-dom": "19.2.8"
+    "react-dom": "19.2.8",
+    "tailwind-merge": "^3.7.0",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@tailwindcss/postcss": "^4",
@@ -20,6 +47,7 @@
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.3.5",
+    "prisma": "^5.22.0",
     "tailwindcss": "^4",
     "typescript": "^5"
   }
