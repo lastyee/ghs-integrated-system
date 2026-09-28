@@ -15,9 +15,11 @@ import {
   ExternalLink,
   X,
   RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useState, useMemo } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 export type EmployerRecord = {
   id: string;
@@ -52,7 +54,8 @@ const initialFormValues: EmployerFormValues = {
   contactPhone: "",
 };
 
-export function EmployersPage() {
+export function EmployersPage({ userRole = "" }: { userRole?: string }) {
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [employers, setEmployers] = useState<EmployerRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -70,6 +73,9 @@ export function EmployersPage() {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState("");
   const [notice, setNotice] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState<EmployerRecord | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -119,6 +125,26 @@ export function EmployersPage() {
   const totalVacancies = useMemo(() => {
     return employers.reduce((sum, emp) => sum + (emp._count?.vacancies || 0), 0);
   }, [employers]);
+
+  const deleteEmployer = async () => {
+    if (!deleteCandidate) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/employers/${deleteCandidate.id}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.message || payload.error || `Gagal menghapus perusahaan (HTTP ${response.status})`);
+      }
+      setNotice(`Perusahaan "${deleteCandidate.name}" berhasil dihapus.`);
+      setDeleteCandidate(null);
+      setRefreshTrigger((previous) => previous + 1);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus perusahaan.");
+    } finally {
+      setDeletePending(false);
+    }
+  };
 
   const openCreateModal = () => {
     setEditingEmployer(null);
@@ -436,6 +462,20 @@ export function EmployersPage() {
                             <ExternalLink className="size-3" />
                             Detail
                           </Link>
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteCandidate(emp);
+                                setDeleteError(null);
+                              }}
+                              className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                              aria-label={`Hapus ${emp.name}`}
+                            >
+                              <Trash2 className="size-3" />
+                              Hapus
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -468,6 +508,20 @@ export function EmployersPage() {
                 <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                   {submitError}
                 </div>
+              )}
+              {deleteCandidate && (
+                <DeleteConfirmationDialog
+                  title="Hapus Employer?"
+                  recordName={deleteCandidate.name}
+                  description="Employer akan dihapus permanen hanya jika tidak memiliki Vacancy atau Placement. Data terkait tidak akan dihapus; server akan menolak penghapusan jika masih ada dependency."
+                  confirmLabel="Hapus Employer"
+                  pending={deletePending}
+                  error={deleteError}
+                  onCancel={() => {
+                    if (!deletePending) setDeleteCandidate(null);
+                  }}
+                  onConfirm={deleteEmployer}
+                />
               )}
 
               <div className="space-y-4">

@@ -1,8 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { ArrowLeft, CheckCircle2, AlertCircle, Save } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { AlertCircle, ArrowLeft, CheckCircle2, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 export interface ApiScoreItem {
   id: string;
@@ -55,7 +57,14 @@ interface StudentRowData {
   feedback: string | null;
 }
 
-export function AssessmentDetail({ assessmentId }: { assessmentId: string }) {
+export function AssessmentDetail({
+  assessmentId,
+  canDelete = false,
+}: {
+  assessmentId: string;
+  canDelete?: boolean;
+}) {
+  const router = useRouter();
   const [assessment, setAssessment] = useState<ApiAssessmentDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -67,6 +76,9 @@ export function AssessmentDetail({ assessmentId }: { assessmentId: string }) {
   const [savingStudentId, setSavingStudentId] = useState<string | null>(null);
   const [actionMessage, setActionMessage] = useState<string | null>(null);
   const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchAssessment = useCallback(async () => {
     setLoading(true);
@@ -312,6 +324,29 @@ export function AssessmentDetail({ assessmentId }: { assessmentId: string }) {
           assessment.scores.reduce((acc, s) => acc + (s.score ?? 0), 0) / scoredCount
         ).toFixed(1)
       : "-";
+  const deleteBlockedReason = assessment.status === "COMPLETED"
+    ? "Assessment COMPLETED tidak dapat dihapus."
+    : assessment.scores.length > 0
+      ? `Assessment memiliki ${assessment.scores.length} nilai.`
+      : null;
+
+  const deleteAssessment = async () => {
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/assessments/${assessmentId}`, { method: "DELETE" });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || `Gagal menghapus assessment (HTTP ${response.status}).`);
+      }
+      router.push("/assessments");
+      router.refresh();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus assessment.");
+    } finally {
+      setDeletePending(false);
+    }
+  };
 
   return (
     <div className="mx-auto max-w-7xl p-4 sm:p-8">
@@ -323,14 +358,36 @@ export function AssessmentDetail({ assessmentId }: { assessmentId: string }) {
         Kembali ke Assessment
       </Link>
 
-      <div className="mt-5">
-        <p className="text-xs text-slate-500">
-          Dashboard / Assessment / {assessment.id}
-        </p>
-        <h1 className="mt-2 text-2xl font-bold text-[#102f50]">{assessment.name}</h1>
-        <p className="mt-1 text-sm text-slate-500">
-          Detail informasi sesi penilaian dan daftar perolehan nilai peserta
-        </p>
+      <div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <div>
+          <p className="text-xs text-slate-500">
+            Dashboard / Assessment / {assessment.id}
+          </p>
+          <h1 className="mt-2 text-2xl font-bold text-[#102f50]">{assessment.name}</h1>
+          <p className="mt-1 text-sm text-slate-500">
+            Detail informasi sesi penilaian dan daftar perolehan nilai peserta
+          </p>
+        </div>
+        {canDelete && (
+          <div className="flex flex-col items-start gap-1 sm:items-end">
+            <button
+              type="button"
+              disabled={Boolean(deleteBlockedReason)}
+              onClick={() => {
+                setDeleteError(null);
+                setDeleteOpen(true);
+              }}
+              title={deleteBlockedReason ?? undefined}
+              className="inline-flex items-center gap-2 rounded-lg bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+            >
+              <Trash2 className="size-4" />
+              Hapus Assessment
+            </button>
+            {deleteBlockedReason && (
+              <p className="text-xs text-slate-500">{deleteBlockedReason}</p>
+            )}
+          </div>
+        )}
       </div>
 
       {actionMessage && (
@@ -528,6 +585,20 @@ export function AssessmentDetail({ assessmentId }: { assessmentId: string }) {
           </div>
         )}
       </section>
+      {deleteOpen && (
+        <DeleteConfirmationDialog
+          title="Hapus assessment ini?"
+          recordName={assessment.name}
+          description="Assessment ini masih berstatus OPEN dan belum memiliki nilai. Data assessment akan dihapus permanen."
+          confirmLabel="Hapus Permanen"
+          pending={deletePending}
+          error={deleteError}
+          onCancel={() => {
+            if (!deletePending) setDeleteOpen(false);
+          }}
+          onConfirm={deleteAssessment}
+        />
+      )}
     </div>
   );
 }

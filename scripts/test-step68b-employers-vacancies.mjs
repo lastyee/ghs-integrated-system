@@ -1,11 +1,18 @@
-// scripts/test-step68b-employers-vacancies.mjs
+﻿// scripts/test-step68b-employers-vacancies.mjs
 // Step 68B: Employer & Vacancy API Test Suite
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP68B_EMPLOYERS_VACANCIES_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP68B_EMPLOYERS_VACANCIES_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -717,7 +724,7 @@ async function run() {
       classesCount !== 10 ||
       schedulesCount !== 10 ||
       instructorsCount !== 6 ||
-      usersCount !== 2
+      usersCount !== 3 /* Updated in STEP 88: real SUPER_ADMIN + 2 test fixtures */
     ) {
       throw new Error("Master database baseline changed!");
     }

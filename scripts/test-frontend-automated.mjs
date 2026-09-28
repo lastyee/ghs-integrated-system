@@ -1,8 +1,15 @@
 import { readFileSync } from "node:fs";
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL ?? "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_FRONTEND_AUTOMATED_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_FRONTEND_AUTOMATED_CONFIRM_DATABASE",
+});
 
 function record(name, expected, actual, passCondition) {
   const pass = passCondition !== undefined ? Boolean(passCondition) : expected === actual;

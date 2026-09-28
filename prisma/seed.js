@@ -30,6 +30,8 @@ const permissionDefinitions = [
   ["batch:create", "create", "batch"],
   ["batch:read", "read", "batch"],
   ["batch:update", "update", "batch"],
+  ["batch:delete", "delete", "batch", "Delete a batch only when it has no enrollments, classes, schedules, or certificates."],
+  ["instructor:delete", "delete", "instructor", "Delete an instructor only when it has no classes, schedules, or linked user."],
   ["enrollment:create", "create", "enrollment"],
   ["enrollment:read", "read", "enrollment"],
   ["enrollment:update", "update", "enrollment"],
@@ -45,16 +47,20 @@ const permissionDefinitions = [
   ["assessment:create", "create", "assessment"],
   ["assessment:read", "read", "assessment"],
   ["assessment:update", "update", "assessment"],
+  ["assessment:delete", "delete", "assessment", "Delete an OPEN assessment only when it has no scores."],
   ["document:create", "create", "document"],
   ["document:read", "read", "document"],
   ["document:update", "update", "document"],
   ["document:verify", "verify", "document"],
+  ["document:delete", "delete", "document", "Delete non-verified documents and their stored objects."],
   ["employer:create", "create", "employer"],
   ["employer:read", "read", "employer"],
   ["employer:update", "update", "employer"],
+  ["employer:delete", "delete", "employer", "Delete an employer only when it has no vacancies or placements."],
   ["vacancy:create", "create", "vacancy"],
   ["vacancy:read", "read", "vacancy"],
   ["vacancy:update", "update", "vacancy"],
+  ["vacancy:delete", "delete", "vacancy", "Delete a vacancy only when it has no applications or placements."],
   ["vacancy:close", "close", "vacancy"],
   ["application:create", "create", "application"],
   ["application:read", "read", "application"],
@@ -83,11 +89,12 @@ const rolePermissionNames = {
     "student:create", "student:read", "student:update",
     "program:create", "program:read", "program:update",
     "subject:create", "subject:read", "subject:update",
-    "batch:create", "batch:read", "batch:update",
+    "batch:create", "batch:read", "batch:update", "batch:delete",
+    "instructor:delete",
     "enrollment:create", "enrollment:read", "enrollment:update",
     "class:create", "class:read", "class:update",
     "schedule:create", "schedule:read", "schedule:update",
-    "attendance:read", "assessment:read", "document:read",
+    "attendance:read", "assessment:read", "assessment:delete", "document:read", "document:delete",
   ],
   INSTRUCTOR: [
     "student:read", "class:read", "schedule:read",
@@ -95,7 +102,7 @@ const rolePermissionNames = {
     "assessment:create", "assessment:read", "assessment:update",
   ],
   PLACEMENT_STAFF: [
-    "student:read", "document:read",
+    "student:read", "document:read", "document:delete",
     "employer:create", "employer:read", "employer:update",
     "vacancy:create", "vacancy:read", "vacancy:update", "vacancy:close",
     "application:create", "application:read", "application:update",
@@ -132,11 +139,16 @@ async function main() {
   const studentPassword = requiredSecret("DEMO_STUDENT_PASSWORD");
 
   const permissionRecords = new Map();
-  for (const [name, action, subject] of permissionDefinitions) {
+  for (const [name, action, subject, description] of permissionDefinitions) {
+    const permissionData = {
+      action,
+      subject,
+      ...(description ? { description } : {}),
+    };
     const permission = await prisma.permission.upsert({
       where: { name },
-      update: { action, subject },
-      create: { name, action, subject },
+      update: permissionData,
+      create: { name, ...permissionData },
     });
     permissionRecords.set(name, permission);
   }

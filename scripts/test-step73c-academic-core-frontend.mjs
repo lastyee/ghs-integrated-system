@@ -1,12 +1,19 @@
-// scripts/test-step73c-academic-core-frontend.mjs
+﻿// scripts/test-step73c-academic-core-frontend.mjs
 // Step 73C: Academic Core Frontend Live Integration Verification Test Suite
 
 import fs from "fs";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP73C_ACADEMIC_CORE_FRONTEND_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP73C_ACADEMIC_CORE_FRONTEND_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -140,7 +147,7 @@ async function run() {
   // 1. Initial Baseline Verification
   console.log("--- 1. Database Baseline Verification ---");
   const baseline = await getBaselineCounts();
-  record("Baseline Users count is 2", 2, baseline.users);
+  record("Baseline Users count is 3", 3, baseline.users /* Updated STEP 88 */);
   record("Baseline Instructors count is 6", 6, baseline.instructors);
   record("Baseline Programs count is 1", 1, baseline.programs);
   record("Baseline Batches count is 2", 2, baseline.batches);
@@ -534,7 +541,7 @@ async function run() {
   // 9. Final Baseline Integrity Check
   console.log("\n--- 9. Final Database Baseline Integrity Check ---");
   const finalCounts = await getBaselineCounts();
-  record("Final Users count is 2", 2, finalCounts.users);
+  record("Final Users count is 3", 3, finalCounts.users /* Updated STEP 88 */);
   record("Final Instructors count is 6", 6, finalCounts.instructors);
   record("Final Programs count is 1", 1, finalCounts.programs);
   record("Final Batches count is 2", 2, finalCounts.batches);

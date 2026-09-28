@@ -1,8 +1,15 @@
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
-const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL ?? "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP66C_ASSESSMENT_HARDENING_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP66C_ASSESSMENT_HARDENING_CONFIRM_DATABASE",
+});
+const prisma = new PrismaClient();
 
 const results = [];
 

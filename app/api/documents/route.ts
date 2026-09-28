@@ -64,9 +64,6 @@ export async function GET(request: Request) {
     ) {
       const storage = getStorageProvider();
       if (storage instanceof MockStorageProvider) {
-        if (searchParams.get("clear") === "true") {
-          storage.clear();
-        }
         return Response.json(
           {
             count: storage.getObjectCount(),

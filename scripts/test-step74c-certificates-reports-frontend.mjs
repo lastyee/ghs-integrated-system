@@ -1,13 +1,20 @@
-// scripts/test-step74c-certificates-reports-frontend.mjs
+﻿// scripts/test-step74c-certificates-reports-frontend.mjs
 // Step 74C: Certificates & Reports Frontend Integration Test Suite
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import fs from "fs";
 import path from "path";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP74C_CERTIFICATES_REPORTS_FRONTEND_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP74C_CERTIFICATES_REPORTS_FRONTEND_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -550,7 +557,7 @@ async function run() {
     console.log("Final baseline counts:", finalCounts);
 
     record("84. Baseline Certificates restored to 0", 0, finalCounts.certificates, "BASELINE");
-    record("85. Baseline Users restored to 2", 2, finalCounts.users, "BASELINE");
+    record("85. Baseline Users restored to 3", 3, finalCounts.users, "BASELINE" /* Updated STEP 88 */);
     record("86. Baseline Instructors restored to 6", 6, finalCounts.instructors, "BASELINE");
     record("87. Baseline Programs restored to 1", 1, finalCounts.programs, "BASELINE");
     record("88. Baseline Batches restored to 2", 2, finalCounts.batches, "BASELINE");

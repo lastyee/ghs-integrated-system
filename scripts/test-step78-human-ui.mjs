@@ -1,4 +1,4 @@
-// scripts/test-step78-human-ui.mjs
+﻿// scripts/test-step78-human-ui.mjs
 import fs from "fs";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
@@ -120,7 +120,7 @@ async function main() {
   const documentsCount = await prisma.document.count();
   const certificatesCount = await prisma.certificate.count();
 
-  record("37. Baseline Users = 2", 2, usersCount, "BASELINE");
+  record("37. Baseline Users = 3", 3, usersCount, "BASELINE" /* Updated STEP 88 */);
   record("38. Baseline Instructors = 6", 6, instructorsCount, "BASELINE");
   record("39. Baseline Programs = 1", 1, programsCount, "BASELINE");
   record("40. Baseline Batches = 2", 2, batchesCount, "BASELINE");

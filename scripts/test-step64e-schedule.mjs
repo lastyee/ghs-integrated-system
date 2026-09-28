@@ -1,7 +1,14 @@
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL ?? "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP64E_SCHEDULE_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP64E_SCHEDULE_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -226,7 +233,7 @@ async function run() {
     prisma.schedule.count(),
   ]);
 
-  record("DB Users count = 2", 2, users);
+  record("DB Users count = 3", 3, users); // Updated in STEP 88: real SUPER_ADMIN + 2 test fixture accounts
   record("DB Instructors count = 6", 6, instructors);
   record("DB Programs count = 1", 1, programs);
   record("DB Batches count = 2", 2, batches);

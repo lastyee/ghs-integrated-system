@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, BookOpen, Loader2, AlertCircle, Calendar } from "lucide-react";
+import { ArrowLeft, BookOpen, Loader2, AlertCircle, Calendar, Trash2 } from "lucide-react";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 interface SubjectDetailData {
   id: string;
@@ -13,10 +14,15 @@ interface SubjectDetailData {
   updatedAt: string;
 }
 
-export function SubjectDetail({ subjectId }: { subjectId: string }) {
+export function SubjectDetail({ subjectId, userRole = "" }: { subjectId: string; userRole?: string }) {
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [subject, setSubject] = useState<SubjectDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletedName, setDeletedName] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -52,6 +58,40 @@ export function SubjectDetail({ subjectId }: { subjectId: string }) {
       isMounted = false;
     };
   }, [subjectId]);
+
+  const deleteSubject = async () => {
+    if (!subject) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/subjects/${subjectId}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || payload.message || `Gagal menghapus mata pelajaran (HTTP ${response.status})`);
+      }
+      setDeletedName(subject.name);
+      setSubject(null);
+      setDeleteDialogOpen(false);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus mata pelajaran.");
+    } finally {
+      setDeletePending(false);
+    }
+  };
+
+  if (deletedName) {
+    return (
+      <div className="mx-auto max-w-375 p-4 sm:p-8">
+        <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Mata pelajaran &quot;{deletedName}&quot; berhasil dihapus.
+        </p>
+        <Link href="/subjects" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#123b63]">
+          <ArrowLeft className="size-4" />
+          Kembali ke Mata Pelajaran
+        </Link>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -92,6 +132,19 @@ export function SubjectDetail({ subjectId }: { subjectId: string }) {
           <h1 className="mt-2 text-2xl font-bold text-[#102f50]">{subject.name}</h1>
           <p className="mt-1 text-sm text-slate-500">{subject.code} · Materi Pelatihan Resmi GHS</p>
         </div>
+        {canDelete && (
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteError(null);
+              setDeleteDialogOpen(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+          >
+            <Trash2 className="size-4" />
+            Hapus Mata Pelajaran
+          </button>
+        )}
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
@@ -103,6 +156,20 @@ export function SubjectDetail({ subjectId }: { subjectId: string }) {
             <div className="sm:col-span-2">
               <Detail label="Deskripsi" value={subject.description || "-"} />
             </div>
+            {canDelete && deleteDialogOpen && (
+              <DeleteConfirmationDialog
+                title="Hapus Mata Pelajaran?"
+                recordName={subject.name}
+                description="Mata pelajaran akan dihapus permanen hanya jika tidak terkait ProgramSubject, Schedule, atau Assessment. Data terkait tidak akan dihapus."
+                confirmLabel="Hapus Mata Pelajaran"
+                pending={deletePending}
+                error={deleteError}
+                onCancel={() => {
+                  if (!deletePending) setDeleteDialogOpen(false);
+                }}
+                onConfirm={deleteSubject}
+              />
+            )}
             <Detail label="Dibuat Pada" value={new Date(subject.createdAt).toLocaleDateString("id-ID", { dateStyle: "long" })} />
             <Detail label="Terakhir Diperbarui" value={new Date(subject.updatedAt).toLocaleDateString("id-ID", { dateStyle: "long" })} />
           </div>

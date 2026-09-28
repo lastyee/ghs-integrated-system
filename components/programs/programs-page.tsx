@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { AlertCircle, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 export type ProgramItem = {
   id: string;
@@ -36,10 +37,14 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
   const [errors, setErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
   const [notice, setNotice] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState<ProgramItem | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   const canMutate = ["SUPER_ADMIN", "ADMIN", "ACADEMIC_STAFF"].includes(userRole);
+  const canDelete = ["SUPER_ADMIN", "ADMIN"].includes(userRole);
 
   useEffect(() => {
     let isMounted = true;
@@ -74,6 +79,26 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
   const reloadPrograms = () => {
     setLoading(true);
     setRefreshTrigger((prev) => prev + 1);
+  };
+
+  const deleteProgram = async () => {
+    if (!deleteCandidate) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/programs/${deleteCandidate.id}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || payload.message || `Gagal menghapus program (HTTP ${response.status})`);
+      }
+      setNotice(`Program "${deleteCandidate.name}" berhasil dihapus.`);
+      setDeleteCandidate(null);
+      reloadPrograms();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus program.");
+    } finally {
+      setDeletePending(false);
+    }
   };
 
   const filtered = useMemo(() => {
@@ -297,6 +322,18 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
                               <Edit3 className="size-4" />
                             </button>
                           )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteCandidate(program);
+                                setDeleteError(null);
+                              }}
+                              className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                            >
+                              Hapus
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -329,6 +366,18 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
                         className="rounded-md border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
                       >
                         Edit
+                      </button>
+                    )}
+                    {canDelete && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDeleteCandidate(program);
+                          setDeleteError(null);
+                        }}
+                        className="rounded-md border border-red-200 px-3 py-1.5 text-xs font-semibold text-red-700 hover:bg-red-50"
+                      >
+                        Hapus
                       </button>
                     )}
                   </div>
@@ -419,6 +468,20 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
             </div>
           </form>
         </div>
+      )}
+      {deleteCandidate && (
+        <DeleteConfirmationDialog
+          title="Hapus Program?"
+          recordName={deleteCandidate.name}
+          description="Program akan dihapus permanen jika tidak memiliki Batch, Certificate, atau relasi Subject. Record terkait tidak akan dihapus; permintaan akan ditolak jika masih ada dependency."
+          confirmLabel="Hapus Program"
+          pending={deletePending}
+          error={deleteError}
+          onCancel={() => {
+            if (!deletePending) setDeleteCandidate(null);
+          }}
+          onConfirm={deleteProgram}
+        />
       )}
     </div>
   );

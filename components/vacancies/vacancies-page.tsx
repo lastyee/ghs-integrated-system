@@ -15,9 +15,11 @@ import {
   X,
   RotateCcw,
   Calendar,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useState, useMemo } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 export type VacancyItem = {
   id: string;
@@ -55,7 +57,8 @@ const initialFormValues: VacancyFormValues = {
   status: "OPEN",
 };
 
-export function VacanciesPage() {
+export function VacanciesPage({ userRole = "" }: { userRole?: string }) {
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [vacancies, setVacancies] = useState<VacancyItem[]>([]);
   const [employers, setEmployers] = useState<EmployerOption[]>([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +82,9 @@ export function VacanciesPage() {
   // Close vacancy action state
   const [closingId, setClosingId] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState<VacancyItem | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Fetch employers for dropdowns
   useEffect(() => {
@@ -279,6 +285,26 @@ export function VacanciesPage() {
       alert(err instanceof Error ? err.message : "Gagal menutup lowongan.");
     } finally {
       setClosingId(null);
+    }
+  };
+
+  const deleteVacancy = async () => {
+    if (!deleteCandidate) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/vacancies/${deleteCandidate.id}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.message || payload.error || `Gagal menghapus lowongan (HTTP ${response.status})`);
+      }
+      setNotice(`Lowongan "${deleteCandidate.title}" berhasil dihapus.`);
+      setDeleteCandidate(null);
+      setRefreshTrigger((previous) => previous + 1);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus lowongan.");
+    } finally {
+      setDeletePending(false);
     }
   };
 
@@ -553,6 +579,20 @@ export function VacanciesPage() {
                             <ExternalLink className="size-3" />
                             Detail
                           </Link>
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteCandidate(vac);
+                                setDeleteError(null);
+                              }}
+                              className="inline-flex items-center gap-1 rounded-md border border-red-200 px-2.5 py-1 text-xs font-medium text-red-700 hover:bg-red-50"
+                              aria-label={`Hapus ${vac.title}`}
+                            >
+                              <Trash2 className="size-3" />
+                              Hapus
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -585,6 +625,20 @@ export function VacanciesPage() {
                 <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                   {submitError}
                 </div>
+              )}
+              {deleteCandidate && (
+                <DeleteConfirmationDialog
+                  title="Hapus Vacancy?"
+                  recordName={deleteCandidate.title}
+                  description="Vacancy akan dihapus permanen hanya jika tidak memiliki Application atau Placement. Record terkait tidak akan dihapus; server akan menolak penghapusan jika masih ada dependency."
+                  confirmLabel="Hapus Vacancy"
+                  pending={deletePending}
+                  error={deleteError}
+                  onCancel={() => {
+                    if (!deletePending) setDeleteCandidate(null);
+                  }}
+                  onConfirm={deleteVacancy}
+                />
               )}
 
               <div className="space-y-4">

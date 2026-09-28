@@ -18,16 +18,21 @@ export interface StorageDeleteOptions {
   path: string;
 }
 
+export type StorageDeleteResult = {
+  outcome: "deleted" | "already_absent";
+};
+
 export interface StorageProvider {
   upload(options: StorageUploadOptions): Promise<{ path: string }>;
   createSignedUrl(options: StorageSignedUrlOptions): Promise<string>;
-  delete(options: StorageDeleteOptions): Promise<void>;
+  delete(options: StorageDeleteOptions): Promise<StorageDeleteResult>;
 }
 
 export class MockStorageProvider implements StorageProvider {
   private objects = new Map<string, { buffer: Buffer; contentType: string }>();
   private uploadLog: string[] = [];
   private deleteLog: string[] = [];
+  private nextDeleteFailure: Error | null = null;
 
   async upload(options: StorageUploadOptions): Promise<{ path: string }> {
     const key = `${options.bucket}/${options.path}`;
@@ -51,10 +56,16 @@ export class MockStorageProvider implements StorageProvider {
     return `https://storage.mock.internal/signed/${options.bucket}/${options.path}?token=mock_sig_${Date.now()}&expires=${expiresAt}`;
   }
 
-  async delete(options: StorageDeleteOptions): Promise<void> {
+  async delete(options: StorageDeleteOptions): Promise<StorageDeleteResult> {
+    if (this.nextDeleteFailure) {
+      const error = this.nextDeleteFailure;
+      this.nextDeleteFailure = null;
+      throw error;
+    }
     const key = `${options.bucket}/${options.path}`;
-    this.objects.delete(key);
+    const existed = this.objects.delete(key);
     this.deleteLog.push(key);
+    return { outcome: existed ? "deleted" : "already_absent" };
   }
 
   has(bucket: string, path: string): boolean {
@@ -63,10 +74,6 @@ export class MockStorageProvider implements StorageProvider {
 
   get(bucket: string, path: string) {
     return this.objects.get(`${bucket}/${path}`);
-  }
-
-  clear(): void {
-    this.objects.clear();
   }
 
   getObjectCount(): number {
@@ -84,12 +91,20 @@ export class MockStorageProvider implements StorageProvider {
   getDeleteHistory(): string[] {
     return [...this.deleteLog];
   }
+
+  failNextDeleteForTest(message = "Mock storage delete failure."): void {
+    this.nextDeleteFailure = new Error(message);
+  }
 }
 
 export class SupabaseStorageProvider implements StorageProvider {
   private client: SupabaseClient;
 
-  constructor(supabaseUrl: string, supabaseServiceRoleKey: string) {
+  constructor(
+    supabaseUrl: string,
+    supabaseServiceRoleKey: string,
+    fetcher: typeof fetch = fetch,
+  ) {
     if (!supabaseUrl || !supabaseServiceRoleKey) {
       throw new Error(
         "Supabase Storage configuration error: SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY are required."
@@ -100,6 +115,7 @@ export class SupabaseStorageProvider implements StorageProvider {
         persistSession: false,
         autoRefreshToken: false,
       },
+      global: { fetch: fetcher },
     });
   }
 
@@ -133,14 +149,16 @@ export class SupabaseStorageProvider implements StorageProvider {
     return data.signedUrl;
   }
 
-  async delete(options: StorageDeleteOptions): Promise<void> {
-    const { error } = await this.client.storage
+  async delete(options: StorageDeleteOptions): Promise<StorageDeleteResult> {
+    const { data, error } = await this.client.storage
       .from(options.bucket)
       .remove([options.path]);
 
     if (error) {
       throw new Error(`Storage delete failed: ${error.message}`);
     }
+
+    return { outcome: data.length > 0 ? "deleted" : "already_absent" };
   }
 }
 

@@ -17,6 +17,13 @@ const batchSelect = {
   endDate: true,
   createdAt: true,
   updatedAt: true,
+  _count: {
+    select: {
+      enrollments: true,
+      classes: true,
+      certificates: true,
+    },
+  },
   program: {
     select: {
       id: true,
@@ -217,9 +224,147 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { error: "Method Not Allowed" },
-    { status: 405, headers: { Allow: "GET, PATCH" } },
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("batch:delete");
+    if (!["SUPER_ADMIN", "ADMIN", "ACADEMIC_STAFF"].includes(authenticatedUser.role)) {
+      throw new AuthorizationError(403, "Permission denied");
+    }
+
+    const { id } = await params;
+    if (!id.trim()) {
+      return Response.json({ error: "Invalid batch ID" }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const batch = await transaction.batch.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          name: true,
+          _count: {
+            select: {
+              enrollments: true,
+              classes: true,
+              certificates: true,
+            },
+          },
+        },
+      });
+
+      if (!batch) return { kind: "not-found" as const };
+
+      const scheduleCount = await transaction.schedule.count({
+        where: { class: { batchId: id } },
+      });
+      const dependencies = {
+        enrollments: batch._count.enrollments,
+        classes: batch._count.classes,
+        schedules: scheduleCount,
+        certificates: batch._count.certificates,
+      };
+
+      if (
+        dependencies.enrollments > 0 ||
+        dependencies.classes > 0 ||
+        dependencies.schedules > 0 ||
+        dependencies.certificates > 0
+      ) {
+        return { kind: "blocked" as const, batch, dependencies };
+      }
+
+      await transaction.batch.delete({ where: { id } });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "BATCH_DELETE",
+        entity: "Batch",
+        entityId: batch.id,
+        changes: {
+          deleted: { name: batch.name },
+          dependencies,
+        },
+      });
+
+      return { kind: "deleted" as const };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (result.kind === "not-found") {
+      return Response.json({ error: "Batch not found" }, { status: 404 });
+    }
+    if (result.kind === "blocked") {
+      return Response.json(
+        {
+          error: "Batch cannot be deleted because it has dependent Enrollment, Class, Schedule, or Certificate records.",
+          dependencies: result.dependencies,
+        },
+        { status: 409 },
+      );
+    }
+
+    return Response.json({ success: true }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      error.code === "P2025"
+    ) {
+      return Response.json({ error: "Batch not found" }, { status: 404 });
+    }
+    if (
+      error instanceof Prisma.PrismaClientKnownRequestError &&
+      ["P2003", "P2034"].includes(error.code)
+    ) {
+      const { id } = await params;
+      const batch = await prisma.batch.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          _count: {
+            select: {
+              enrollments: true,
+              classes: true,
+              certificates: true,
+            },
+          },
+        },
+      });
+      const [schedules, certificates] = await Promise.all([
+        prisma.schedule.count({ where: { class: { batchId: id } } }),
+        prisma.certificate.count({ where: { batchId: id } }),
+      ]);
+      if (
+        batch &&
+        (
+          batch._count.enrollments > 0 ||
+          batch._count.classes > 0 ||
+          schedules > 0 ||
+          certificates > 0
+        )
+      ) {
+        return Response.json(
+          {
+            error: "Batch cannot be deleted because it has dependent Enrollment, Class, Schedule, or Certificate records.",
+            dependencies: {
+              enrollments: batch._count.enrollments,
+              classes: batch._count.classes,
+              schedules,
+              certificates,
+            },
+          },
+          { status: 409 },
+        );
+      }
+      return Response.json(
+        { error: "Batch changed during deletion. Please retry." },
+        { status: 409 },
+      );
+    }
+
+    console.error("Failed to delete batch", error);
+    return Response.json({ error: "Unable to delete batch" }, { status: 500 });
+  }
 }

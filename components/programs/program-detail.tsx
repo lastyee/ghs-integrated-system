@@ -2,7 +2,8 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { ArrowLeft, BookOpen, GraduationCap, Loader2, AlertCircle } from "lucide-react";
+import { ArrowLeft, BookOpen, GraduationCap, Loader2, AlertCircle, Trash2 } from "lucide-react";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 interface BatchSummary {
   id: string;
@@ -21,10 +22,15 @@ interface ProgramDetailData {
   batches?: BatchSummary[];
 }
 
-export function ProgramDetail({ programId }: { programId: string }) {
+export function ProgramDetail({ programId, userRole = "" }: { programId: string; userRole?: string }) {
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [program, setProgram] = useState<ProgramDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletedName, setDeletedName] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -60,6 +66,40 @@ export function ProgramDetail({ programId }: { programId: string }) {
       isMounted = false;
     };
   }, [programId]);
+
+  const deleteProgram = async () => {
+    if (!program) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/programs/${programId}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || payload.message || `Gagal menghapus program (HTTP ${response.status})`);
+      }
+      setDeletedName(program.name);
+      setProgram(null);
+      setDeleteDialogOpen(false);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus program.");
+    } finally {
+      setDeletePending(false);
+    }
+  };
+
+  if (deletedName) {
+    return (
+      <div className="mx-auto max-w-375 p-4 sm:p-8">
+        <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Program &quot;{deletedName}&quot; berhasil dihapus.
+        </p>
+        <Link href="/programs" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#123b63]">
+          <ArrowLeft className="size-4" />
+          Kembali ke Program
+        </Link>
+      </div>
+    );
+  }
 
   if (loading) {
     return (
@@ -100,6 +140,19 @@ export function ProgramDetail({ programId }: { programId: string }) {
           <h1 className="mt-2 text-2xl font-bold text-[#102f50]">{program.name}</h1>
           <p className="mt-1 text-sm text-slate-500">{program.code} · Program Resmi GHS</p>
         </div>
+        {canDelete && (
+          <button
+            type="button"
+            onClick={() => {
+              setDeleteError(null);
+              setDeleteDialogOpen(true);
+            }}
+            className="inline-flex items-center gap-2 rounded-lg border border-red-200 px-3 py-2 text-sm font-semibold text-red-700 hover:bg-red-50"
+          >
+            <Trash2 className="size-4" />
+            Hapus Program
+          </button>
+        )}
       </div>
 
       <div className="mt-6 grid gap-6 xl:grid-cols-2">
@@ -169,6 +222,20 @@ export function ProgramDetail({ programId }: { programId: string }) {
           </div>
         </section>
       </div>
+      {canDelete && deleteDialogOpen && (
+        <DeleteConfirmationDialog
+          title="Hapus Program?"
+          recordName={program.name}
+          description="Program akan dihapus permanen hanya jika tidak memiliki Batch, Certificate, atau relasi Subject. Data terkait tidak akan dihapus."
+          confirmLabel="Hapus Program"
+          pending={deletePending}
+          error={deleteError}
+          onCancel={() => {
+            if (!deletePending) setDeleteDialogOpen(false);
+          }}
+          onConfirm={deleteProgram}
+        />
+      )}
     </div>
   );
 }

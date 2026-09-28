@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   AuthorizationError,
   authorizationErrorResponse,
@@ -194,9 +194,80 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { message: "Method Not Allowed. Employer deletion is not permitted." },
-    { status: 405, headers: { Allow: "GET, PATCH" } }
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("employer:delete");
+    const { id } = await params;
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const employer = await transaction.employer.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          name: true,
+          _count: { select: { vacancies: true, placements: true } },
+        },
+      });
+
+      if (!employer) return { kind: "not-found" as const };
+
+      const dependencies = employer._count;
+      if (dependencies.vacancies > 0 || dependencies.placements > 0) {
+        return { kind: "blocked" as const, employer, dependencies };
+      }
+
+      await transaction.employer.delete({ where: { id } });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Employer",
+        entityId: employer.id,
+        changes: { deleted: { name: employer.name }, dependencies },
+      });
+
+      return { kind: "deleted" as const, id: employer.id, name: employer.name };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (result.kind === "not-found") {
+      return Response.json({ message: "Employer not found." }, { status: 404 });
+    }
+    if (result.kind === "blocked") {
+      return Response.json(
+        {
+          message: `Employer "${result.employer.name}" cannot be deleted because it still has dependent records.`,
+          dependencies: result.dependencies,
+        },
+        { status: 409 },
+      );
+    }
+
+    return Response.json({ data: result }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === "P2025") {
+        return Response.json({ message: "Employer not found." }, { status: 404 });
+      }
+      if (error.code === "P2003" || error.code === "P2034") {
+        const { id } = await params;
+        const [vacancies, placements] = await Promise.all([
+          prisma.vacancy.count({ where: { employerId: id } }),
+          prisma.placement.count({ where: { employerId: id } }),
+        ]);
+        return Response.json(
+          {
+            message: "Employer cannot be deleted because dependent records changed during the request.",
+            dependencies: { vacancies, placements },
+          },
+          { status: 409 },
+        );
+      }
+    }
+    console.error("DELETE /api/employers/[id] error:", error);
+    return Response.json({ message: "Internal server error." }, { status: 500 });
+  }
 }

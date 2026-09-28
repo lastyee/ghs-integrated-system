@@ -18,6 +18,12 @@ export async function GET() {
         userId: true,
         createdAt: true,
         updatedAt: true,
+        _count: {
+          select: {
+            classes: true,
+            schedules: true,
+          },
+        },
       },
       orderBy: {
         name: "asc",

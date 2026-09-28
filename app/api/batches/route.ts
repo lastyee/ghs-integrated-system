@@ -17,6 +17,13 @@ const batchSelect = {
   endDate: true,
   createdAt: true,
   updatedAt: true,
+  _count: {
+    select: {
+      enrollments: true,
+      classes: true,
+      certificates: true,
+    },
+  },
   program: {
     select: {
       id: true,

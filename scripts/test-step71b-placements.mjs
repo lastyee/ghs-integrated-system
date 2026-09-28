@@ -1,8 +1,9 @@
-// scripts/test-step71b-placements.mjs
+﻿// scripts/test-step71b-placements.mjs
 // Step 71B: Placement API & Business Logic Comprehensive Test Suite
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
@@ -92,11 +93,13 @@ async function login(email, password) {
 }
 
 async function run() {
+  assertSafeMutationTarget({
+    mutationFlag: "STEP71B_TEST_ALLOW_MUTATIONS",
+    expectedDatabase: "ghs_integrated_test",
+    confirmationFlag: "STEP71B_TEST_CONFIRM_DATABASE",
+    baseUrl,
+  });
   console.log("=== STEP 71B PLACEMENT API & BUSINESS LOGIC TEST SUITE ===\n");
-
-  // Pre-cleanup of any stale test artifacts
-  await prisma.user.deleteMany({ where: { email: { contains: "71b" } } }).catch(() => {});
-  await prisma.employer.deleteMany({ where: { contactEmail: { contains: "grandsukabumi.test" } } }).catch(() => {});
 
   const createdUserIds = [];
   const createdRoleIds = [];
@@ -159,7 +162,7 @@ async function run() {
     record("Baseline initial Placements == 0", 0, initialCounts.placements);
     record("Baseline initial Documents == 0", 0, initialCounts.documents);
     record("Baseline initial Students == 21", 21, initialCounts.students);
-    record("Baseline initial Users == 2", 2, initialCounts.users);
+    record("Baseline initial Users == 3", 3, initialCounts.users /* Updated STEP 88 */);
 
     console.log("2. Authenticating demo users...");
     const superAdminCookies = await login(
@@ -849,7 +852,7 @@ async function run() {
     console.log(`Classes:      ${finalCounts.classes} (expected 10)`);
     console.log(`Schedules:    ${finalCounts.schedules} (expected 10)`);
     console.log(`Instructors:  ${finalCounts.instructors} (expected 6)`);
-    console.log(`Users:        ${finalCounts.users} (expected 2)`);
+    console.log(`Users:        ${finalCounts.users} (expected 3)`);
 
     const baselineMatches =
       finalCounts.employers === 0 &&
@@ -864,7 +867,7 @@ async function run() {
       finalCounts.classes === 10 &&
       finalCounts.schedules === 10 &&
       finalCounts.instructors === 6 &&
-      finalCounts.users === 2;
+      finalCounts.users === 3 /* Updated STEP 88 */;
 
     if (!baselineMatches) {
       console.error("FATAL: Database baseline mismatch after cleanup!");

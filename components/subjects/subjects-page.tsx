@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { BookOpen, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X, AlertCircle } from "lucide-react";
+import { BookOpen, Edit3, Eye, Loader2, Plus, RotateCcw, Search, Trash2, X, AlertCircle } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 interface SubjectData {
   id: string;
@@ -49,6 +50,10 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [deleteCandidate, setDeleteCandidate] = useState<SubjectData | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
 
   useEffect(() => {
     let isMounted = true;
@@ -82,6 +87,26 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
   const reloadSubjects = () => {
     setLoading(true);
     setRefreshTrigger((prev) => prev + 1);
+  };
+
+  const deleteSubject = async () => {
+    if (!deleteCandidate) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/subjects/${deleteCandidate.id}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || payload.message || `Gagal menghapus mata pelajaran (HTTP ${response.status})`);
+      }
+      setNotice(`Mata pelajaran "${deleteCandidate.name}" berhasil dihapus.`);
+      setDeleteCandidate(null);
+      reloadSubjects();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus mata pelajaran.");
+    } finally {
+      setDeletePending(false);
+    }
   };
 
   const filtered = useMemo(() => {
@@ -335,6 +360,19 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
                               <Edit3 className="size-4" />
                             </button>
                           )}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteCandidate(subject);
+                                setDeleteError(null);
+                              }}
+                              className="rounded-md p-2 text-red-700 hover:bg-red-50"
+                              aria-label={`Hapus ${subject.code}`}
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -376,6 +414,20 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
               <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                 {submitError}
               </div>
+            )}
+            {deleteCandidate && (
+              <DeleteConfirmationDialog
+                title="Hapus Mata Pelajaran?"
+                recordName={deleteCandidate.name}
+                description="Mata pelajaran akan dihapus permanen hanya jika tidak terkait ProgramSubject, Schedule, atau Assessment. Data terkait tidak akan dihapus."
+                confirmLabel="Hapus Mata Pelajaran"
+                pending={deletePending}
+                error={deleteError}
+                onCancel={() => {
+                  if (!deletePending) setDeleteCandidate(null);
+                }}
+                onConfirm={deleteSubject}
+              />
             )}
 
             <div className="mt-4 space-y-4">

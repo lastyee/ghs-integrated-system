@@ -15,8 +15,10 @@ import {
   MapPin,
   FileText,
   ListChecks,
+  Trash2,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 export type VacancyDetailData = {
   id: string;
@@ -42,7 +44,8 @@ type EditVacancyFormValues = {
   status: "OPEN" | "CLOSED";
 };
 
-export function VacancyDetail({ vacancyId }: { vacancyId: string }) {
+export function VacancyDetail({ vacancyId, userRole = "" }: { vacancyId: string; userRole?: string }) {
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [vacancy, setVacancy] = useState<VacancyDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -65,6 +68,10 @@ export function VacancyDetail({ vacancyId }: { vacancyId: string }) {
   // Close vacancy action
   const [closing, setClosing] = useState(false);
   const [notice, setNotice] = useState("");
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
+  const [deletedTitle, setDeletedTitle] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -103,6 +110,40 @@ export function VacancyDetail({ vacancyId }: { vacancyId: string }) {
       isMounted = false;
     };
   }, [vacancyId, refreshTrigger]);
+
+  const deleteVacancy = async () => {
+    if (!vacancy) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/vacancies/${vacancyId}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.message || payload.error || `Gagal menghapus lowongan (HTTP ${response.status})`);
+      }
+      setDeletedTitle(vacancy.title);
+      setVacancy(null);
+      setDeleteDialogOpen(false);
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus lowongan.");
+    } finally {
+      setDeletePending(false);
+    }
+  };
+
+  if (deletedTitle) {
+    return (
+      <div className="mx-auto max-w-5xl p-4 sm:p-8">
+        <p role="status" className="rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          Lowongan &quot;{deletedTitle}&quot; berhasil dihapus.
+        </p>
+        <Link href="/vacancies" className="mt-4 inline-flex items-center gap-2 text-sm font-semibold text-[#102f50]">
+          <ArrowLeft className="size-4" />
+          Kembali ke Daftar Lowongan
+        </Link>
+      </div>
+    );
+  }
 
   const openEditModal = () => {
     if (!vacancy) return;
@@ -355,6 +396,19 @@ export function VacancyDetail({ vacancyId }: { vacancyId: string }) {
             <Edit2 className="size-3.5" />
             Edit Lowongan
           </button>
+          {canDelete && (
+            <button
+              type="button"
+              onClick={() => {
+                setDeleteError(null);
+                setDeleteDialogOpen(true);
+              }}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-red-200 bg-white px-3.5 py-2 text-xs font-semibold text-red-700 shadow-sm hover:bg-red-50"
+            >
+              <Trash2 className="size-3.5" />
+              Hapus Vacancy
+            </button>
+          )}
         </div>
       </div>
 
@@ -493,6 +547,20 @@ export function VacancyDetail({ vacancyId }: { vacancyId: string }) {
                 <div className="mb-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                   {submitError}
                 </div>
+              )}
+              {canDelete && deleteDialogOpen && (
+                <DeleteConfirmationDialog
+                  title="Hapus Vacancy?"
+                  recordName={vacancy.title}
+                  description="Vacancy akan dihapus permanen hanya jika tidak memiliki Application atau Placement. Data terkait tidak akan dihapus."
+                  confirmLabel="Hapus Vacancy"
+                  pending={deletePending}
+                  error={deleteError}
+                  onCancel={() => {
+                    if (!deletePending) setDeleteDialogOpen(false);
+                  }}
+                  onConfirm={deleteVacancy}
+                />
               )}
 
               <div className="space-y-4">

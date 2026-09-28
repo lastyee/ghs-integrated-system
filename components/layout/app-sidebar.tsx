@@ -22,6 +22,7 @@ const itemRoutes: Record<string, string> = {
   Batch: "/batches",
   Enrollment: "/enrollments",
   Kelas: "/classes",
+  Instruktur: "/instructors",
   Jadwal: "/schedules",
   Kehadiran: "/attendance",
   Penilaian: "/assessments",
@@ -78,6 +79,13 @@ export function AppSidebar({
       });
     }
 
+    if (isAdminOrSuperAdmin || isAcademic) {
+      const academicGroup = rawGroups.find((group) => group.label === "Akademik");
+      if (academicGroup && !academicGroup.items.some((item) => item.label === "Instruktur")) {
+        academicGroup.items.push({ label: "Instruktur", icon: Users });
+      }
+    }
+
     // Add User Management for Admin and Super Admin
     if (isAdminOrSuperAdmin) {
       if (!rawGroups.some((g) => g.label === "Sistem & Pengguna")) {
@@ -99,6 +107,9 @@ export function AppSidebar({
         }
 
         if (isAcademicOrInstructor && item.label === "Lamaran") {
+          return false;
+        }
+        if (item.label === "Instruktur" && !isAdminOrSuperAdmin && !isAcademic) {
           return false;
         }
 

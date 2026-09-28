@@ -1,5 +1,6 @@
-import { PrismaClient } from "@prisma/client";
+﻿import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = "http://localhost:3000";
@@ -113,6 +114,12 @@ async function api(method, apiPath, cookies = "", body = undefined, customHeader
 }
 
 async function main() {
+  assertSafeMutationTarget({
+    mutationFlag: "STEP81_TEST_ALLOW_MUTATIONS",
+    expectedDatabase: "ghs_integrated_test",
+    confirmationFlag: "STEP81_TEST_CONFIRM_DATABASE",
+    baseUrl,
+  });
   console.log("==================================================");
   console.log("STEP 81: WORKFLOW LIFECYCLE & CROSS-MODULE AUDIT");
   console.log("==================================================\n");
@@ -1165,16 +1172,6 @@ async function main() {
       await prisma.user.deleteMany({ where: { id: { in: cleanup.users } } });
     }
 
-    // Clean any lingering test audit logs
-    await prisma.auditLog.deleteMany({
-      where: {
-        OR: [
-          { changes: { path: ["fields", "notes", "after"], equals: "Audit Test Completed" } },
-          { changes: { path: ["fields", "notes", "after"], equals: "Restored to ACTIVE" } },
-        ],
-      },
-    });
-
     const [
       users, instructors, programs, batches, students, enrollments,
       subjects, classes, schedules, employers, vacancies, applications,
@@ -1198,7 +1195,7 @@ async function main() {
       prisma.certificate.count(),
     ]);
 
-    record("Baseline Users = 2", 2, users, "BASELINE");
+    record("Baseline Users = 3", 3, users, "BASELINE" /* Updated STEP 88 */);
     record("Baseline Instructors = 6", 6, instructors, "BASELINE");
     record("Baseline Programs = 1", 1, programs, "BASELINE");
     record("Baseline Batches = 2", 2, batches, "BASELINE");

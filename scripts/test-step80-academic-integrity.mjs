@@ -1,7 +1,8 @@
-// scripts/test-step80-academic-integrity.mjs
+﻿// scripts/test-step80-academic-integrity.mjs
 // Step 80: Academic & Training Operational Integrity Hardening Test Suite
 
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
@@ -119,6 +120,12 @@ async function api(method, apiPath, cookies = "", body = undefined, customHeader
 }
 
 async function main() {
+  assertSafeMutationTarget({
+    mutationFlag: "STEP80_TEST_ALLOW_MUTATIONS",
+    expectedDatabase: "ghs_integrated_test",
+    confirmationFlag: "STEP80_TEST_CONFIRM_DATABASE",
+    baseUrl,
+  });
   console.log("==================================================");
   console.log("STEP 80: ACADEMIC & TRAINING OPERATIONAL INTEGRITY TEST");
   console.log("==================================================\n");
@@ -829,7 +836,6 @@ async function main() {
 
     if (cleanup.users.length > 0) {
       await prisma.auditLog.deleteMany({ where: { userId: { in: cleanup.users } } });
-      await prisma.auditLog.deleteMany({ where: { entity: "Student", action: "ACTIVATE_ACCOUNT" } });
       await prisma.student.updateMany({
         where: { userId: { in: cleanup.users } },
         data: { userId: null },
@@ -882,16 +888,6 @@ async function main() {
       await prisma.enrollment.deleteMany({ where: { id: { in: cleanup.enrollments } } });
     }
 
-    // Clean any lingering test audit logs
-    await prisma.auditLog.deleteMany({
-      where: {
-        OR: [
-          { changes: { path: ["fields", "notes", "after"], equals: "Step 80 Test Enrollment" } },
-          { changes: { path: ["fields", "name", "after"], equals: "Step 80 Integrity Test Class" } },
-        ]
-      }
-    });
-
     const [
       users, instructors, programs, batches, students, enrollments,
       subjects, classes, schedules, employers, vacancies, applications,
@@ -915,7 +911,7 @@ async function main() {
       prisma.certificate.count(),
     ]);
 
-    record("Baseline Users = 2", 2, users, "BASELINE");
+    record("Baseline Users = 3", 3, users, "BASELINE" /* Updated STEP 88 */);
     record("Baseline Instructors = 6", 6, instructors, "BASELINE");
     record("Baseline Programs = 1", 1, programs, "BASELINE");
     record("Baseline Batches = 2", 2, batches, "BASELINE");

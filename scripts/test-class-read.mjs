@@ -1,9 +1,16 @@
 import { randomUUID } from "node:crypto";
 import bcrypt from "bcryptjs";
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL ?? "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_CLASS_READ_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_CLASS_READ_CONFIRM_DATABASE",
+});
 const runId = randomUUID().slice(0, 8);
 const prefix = `STEP36-${runId}`;
 const password = `step36-${randomUUID()}`;

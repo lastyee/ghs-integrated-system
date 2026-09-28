@@ -5,6 +5,7 @@ import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import fs from "fs";
 import path from "path";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
@@ -151,6 +152,13 @@ async function getBaselineCounts() {
 }
 
 async function main() {
+  assertSafeMutationTarget({
+    mutationFlag: "STEP82_TEST_ALLOW_MUTATIONS",
+    expectedDatabase: "ghs_integrated_test",
+    confirmationFlag: "STEP82_TEST_CONFIRM_DATABASE",
+    baseUrl,
+  });
+
   console.log("==================================================");
   console.log("STEP 82: REALISTIC END-TO-END SCENARIO SIMULATION");
   console.log("==================================================\n");
@@ -180,7 +188,7 @@ async function main() {
     const initialBaseline = await getBaselineCounts();
     console.log("Initial Baseline Counts:", JSON.stringify(initialBaseline, null, 2));
 
-    record("Baseline: users = 2", 2, initialBaseline.users, "BASELINE_CHECK");
+    record("Baseline: users = 3", 3, initialBaseline.users, "BASELINE_CHECK"); // Updated in STEP 88: real SUPER_ADMIN + 2 test fixtures
     record("Baseline: instructors = 6", 6, initialBaseline.instructors, "BASELINE_CHECK");
     record("Baseline: programs = 1", 1, initialBaseline.programs, "BASELINE_CHECK");
     record("Baseline: batches = 2", 2, initialBaseline.batches, "BASELINE_CHECK");
@@ -1022,65 +1030,52 @@ async function main() {
 
     try {
       // 1. Scores & Assessments
-      await prisma.assessmentScore.deleteMany({ where: { assessment: { class: { name: { contains: "82" } } } } }).catch(() => {});
       if (cleanup.scores.length > 0) {
         await prisma.assessmentScore.deleteMany({ where: { id: { in: cleanup.scores } } }).catch(() => {});
       }
-      await prisma.assessment.deleteMany({ where: { class: { name: { contains: "82" } } } }).catch(() => {});
       if (cleanup.assessments.length > 0) {
         await prisma.assessment.deleteMany({ where: { id: { in: cleanup.assessments } } }).catch(() => {});
       }
 
       // 2. Attendances & Schedules & Classes
-      await prisma.attendance.deleteMany({ where: { schedule: { class: { name: { contains: "82" } } } } }).catch(() => {});
       if (cleanup.attendances.length > 0) {
         await prisma.attendance.deleteMany({ where: { id: { in: cleanup.attendances } } }).catch(() => {});
       }
-      await prisma.schedule.deleteMany({ where: { class: { name: { contains: "82" } } } }).catch(() => {});
       if (cleanup.schedules.length > 0) {
         await prisma.schedule.deleteMany({ where: { id: { in: cleanup.schedules } } }).catch(() => {});
       }
-      await prisma.class.deleteMany({ where: { name: { contains: "82" } } }).catch(() => {});
       if (cleanup.classes.length > 0) {
         await prisma.class.deleteMany({ where: { id: { in: cleanup.classes } } }).catch(() => {});
       }
 
       // 3. Certificates
-      await prisma.certificate.deleteMany({ where: { certificateNumber: { contains: "82" } } }).catch(() => {});
       if (cleanup.certificates.length > 0) {
         await prisma.certificate.deleteMany({ where: { id: { in: cleanup.certificates } } }).catch(() => {});
       }
 
       // 4. Placements, Interviews, Applications, Vacancies, Employers
-      await prisma.placement.deleteMany({ where: { employer: { name: { contains: "Grand Hyatt" } } } }).catch(() => {});
       if (cleanup.placements.length > 0) {
         await prisma.placement.deleteMany({ where: { id: { in: cleanup.placements } } }).catch(() => {});
       }
-      await prisma.interview.deleteMany({ where: { application: { vacancy: { employer: { name: { contains: "Grand Hyatt" } } } } } }).catch(() => {});
       if (cleanup.interviews.length > 0) {
         await prisma.interview.deleteMany({ where: { id: { in: cleanup.interviews } } }).catch(() => {});
       }
-      await prisma.application.deleteMany({ where: { vacancy: { employer: { name: { contains: "Grand Hyatt" } } } } }).catch(() => {});
       if (cleanup.applications.length > 0) {
         await prisma.application.deleteMany({ where: { id: { in: cleanup.applications } } }).catch(() => {});
       }
-      await prisma.vacancy.deleteMany({ where: { employer: { name: { contains: "Grand Hyatt" } } } }).catch(() => {});
       if (cleanup.vacancies.length > 0) {
         await prisma.vacancy.deleteMany({ where: { id: { in: cleanup.vacancies } } }).catch(() => {});
       }
-      await prisma.employer.deleteMany({ where: { name: { contains: "Grand Hyatt" } } }).catch(() => {});
       if (cleanup.employers.length > 0) {
         await prisma.employer.deleteMany({ where: { id: { in: cleanup.employers } } }).catch(() => {});
       }
 
       // 5. Documents
-      await prisma.document.deleteMany({ where: { fileName: { contains: "test82" } } }).catch(() => {});
       if (cleanup.documents.length > 0) {
         await prisma.document.deleteMany({ where: { id: { in: cleanup.documents } } }).catch(() => {});
       }
 
       // 6. Users
-      await prisma.user.deleteMany({ where: { email: { contains: ".test82@ghs.local" } } }).catch(() => {});
       if (cleanup.users.length > 0) {
         await prisma.user.deleteMany({ where: { id: { in: cleanup.users } } }).catch(() => {});
       }
@@ -1091,7 +1086,7 @@ async function main() {
     const finalBaseline = await getBaselineCounts();
     console.log("Final Baseline Counts:", JSON.stringify(finalBaseline, null, 2));
 
-    record("Baseline restored: users = 2", 2, finalBaseline.users, "BASELINE_RESTORATION");
+    record("Baseline restored: users = 3", 3, finalBaseline.users, "BASELINE_RESTORATION"); // Updated in STEP 88
     record("Baseline restored: instructors = 6", 6, finalBaseline.instructors, "BASELINE_RESTORATION");
     record("Baseline restored: programs = 1", 1, finalBaseline.programs, "BASELINE_RESTORATION");
     record("Baseline restored: batches = 2", 2, finalBaseline.batches, "BASELINE_RESTORATION");

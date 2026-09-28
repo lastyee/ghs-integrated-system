@@ -171,9 +171,101 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { error: "Method Not Allowed" },
-    { status: 405, headers: { Allow: "GET, PATCH" } },
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("program:delete");
+    const { id } = await params;
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const program = await transaction.program.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          code: true,
+          name: true,
+          _count: {
+            select: {
+              batches: true,
+              certificates: true,
+              subjects: true,
+            },
+          },
+        },
+      });
+
+      if (!program) return { kind: "not-found" as const };
+
+      const dependencies = {
+        batches: program._count.batches,
+        certificates: program._count.certificates,
+        programSubjects: program._count.subjects,
+      };
+      if (
+        dependencies.batches > 0 ||
+        dependencies.certificates > 0 ||
+        dependencies.programSubjects > 0
+      ) {
+        return { kind: "blocked" as const, program, dependencies };
+      }
+
+      await transaction.program.delete({ where: { id } });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Program",
+        entityId: program.id,
+        changes: { deleted: { code: program.code, name: program.name }, dependencies },
+      });
+
+      return { kind: "deleted" as const, id: program.id, code: program.code, name: program.name };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (result.kind === "not-found") {
+      return Response.json({ error: "Program not found" }, { status: 404 });
+    }
+    if (result.kind === "blocked") {
+      const reasons = [
+        result.dependencies.batches > 0 && `${result.dependencies.batches} Batch`,
+        result.dependencies.certificates > 0 && `${result.dependencies.certificates} Certificate`,
+        result.dependencies.programSubjects > 0 && `${result.dependencies.programSubjects} Subject link`,
+      ].filter(Boolean);
+      return Response.json(
+        {
+          error: `Program "${result.program.name}" tidak dapat dihapus karena masih memiliki ${reasons.join(", ")}.`,
+          dependencies: result.dependencies,
+        },
+        { status: 409 },
+      );
+    }
+
+    return Response.json({ data: result }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === "P2025") {
+        return Response.json({ error: "Program not found" }, { status: 404 });
+      }
+      if (error.code === "P2003" || error.code === "P2034") {
+        const { id } = await params;
+        const [batches, certificates, subjects] = await Promise.all([
+          prisma.batch.count({ where: { programId: id } }),
+          prisma.certificate.count({ where: { programId: id } }),
+          prisma.programSubject.count({ where: { programId: id } }),
+        ]);
+        return Response.json(
+          {
+            error: "Program tidak dapat dihapus karena relasi berubah saat proses berlangsung.",
+            dependencies: { batches, certificates, programSubjects: subjects },
+          },
+          { status: 409 },
+        );
+      }
+    }
+    console.error("Failed to delete program", error);
+    return Response.json({ error: "Unable to delete program" }, { status: 500 });
+  }
 }

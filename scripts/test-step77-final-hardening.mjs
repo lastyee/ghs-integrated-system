@@ -1,13 +1,20 @@
-// scripts/test-step77-final-hardening.mjs
+﻿// scripts/test-step77-final-hardening.mjs
 // Step 77: Final Security, Identity & Completion Hardening Test Suite
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import fs from "fs";
 import path from "path";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
-const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP77_FINAL_HARDENING_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP77_FINAL_HARDENING_CONFIRM_DATABASE",
+});
+const prisma = new PrismaClient();
 
 const results = [];
 
@@ -412,7 +419,7 @@ async function main() {
       prisma.certificate.count(),
     ]);
 
-    record("Baseline Users = 2", 2, userCount, "BASELINE");
+    record("Baseline Users = 3", 3, userCount, "BASELINE" /* Updated STEP 88 */);
     record("Baseline Instructors = 6", 6, instructorCount, "BASELINE");
     record("Baseline Programs = 1", 1, programCount, "BASELINE");
     record("Baseline Batches = 2", 2, batchCount, "BASELINE");

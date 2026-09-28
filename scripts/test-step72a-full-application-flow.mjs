@@ -1,12 +1,19 @@
-// scripts/test-step72a-full-application-flow.mjs
+﻿// scripts/test-step72a-full-application-flow.mjs
 // Step 72A & 72B: Full Application Flow & Navigation Hardening Test Suite
 
 import fs from "fs";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP72A_FULL_APPLICATION_FLOW_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP72A_FULL_APPLICATION_FLOW_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -126,7 +133,7 @@ async function run() {
     record("Baseline: Classes is 10", 10, preCounts.classes);
     record("Baseline: Schedules is 10", 10, preCounts.schedules);
     record("Baseline: Instructors is 6", 6, preCounts.instructors);
-    record("Baseline: Users is 2", 2, preCounts.users);
+    record("Baseline: Users is 3", 3, preCounts.users /* Updated STEP 88 */);
 
     // ==========================================
     // 2. Authentication Flow Audit
@@ -458,7 +465,7 @@ async function run() {
     record("Post-Test Baseline: Classes is 10", 10, postCounts.classes);
     record("Post-Test Baseline: Schedules is 10", 10, postCounts.schedules);
     record("Post-Test Baseline: Instructors is 6", 6, postCounts.instructors);
-    record("Post-Test Baseline: Users is 2", 2, postCounts.users);
+    record("Post-Test Baseline: Users is 3", 3, postCounts.users /* Updated STEP 88 */);
   } catch (error) {
     console.error("Test execution failed:", error);
     process.exit(1);

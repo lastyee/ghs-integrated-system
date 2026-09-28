@@ -1,8 +1,9 @@
-// scripts/test-step69b-applications.mjs
+﻿// scripts/test-step69b-applications.mjs
 // Step 69B: Application API & Business Logic Comprehensive Test Suite
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
@@ -92,10 +93,13 @@ async function login(email, password) {
 }
 
 async function run() {
+  assertSafeMutationTarget({
+    mutationFlag: "STEP69B_TEST_ALLOW_MUTATIONS",
+    expectedDatabase: "ghs_integrated_test",
+    confirmationFlag: "STEP69B_TEST_CONFIRM_DATABASE",
+    baseUrl,
+  });
   console.log("=== STEP 69B APPLICATION API & BUSINESS LOGIC TEST SUITE ===\n");
-
-  await prisma.user.deleteMany({ where: { email: { contains: "69b" } } }).catch(() => {});
-  await prisma.employer.deleteMany({ where: { name: { contains: "69B" } } }).catch(() => {});
 
   const createdUserIds = [];
   const createdEmployerIds = [];
@@ -896,7 +900,7 @@ async function run() {
     record("10.9 Classes = 10", 10, classesCount);
     record("10.10 Schedules = 10", 10, schedulesCount);
     record("10.11 Instructors = 6", 6, instructorsCount);
-    record("10.12 Users = 2", 2, usersCount);
+    record("10.12 Users = 3", 3, usersCount /* Updated STEP 88 */);
 
     console.log("\n==========================================");
     console.log(`ALL ${results.length} TESTS FINISHED!`);

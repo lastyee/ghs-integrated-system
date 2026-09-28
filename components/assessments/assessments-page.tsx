@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Eye, FileCheck2, MoreHorizontal, Plus, RotateCcw, Search, X, AlertCircle } from "lucide-react";
+import { AlertCircle, Eye, FileCheck2, MoreHorizontal, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 import { AssessmentType, AssessmentSessionStatus } from "@prisma/client";
 
 export interface ApiAssessment {
@@ -83,7 +84,7 @@ const statuses: AssessmentSessionStatus[] = [
   AssessmentSessionStatus.COMPLETED,
 ];
 
-export function AssessmentsPage() {
+export function AssessmentsPage({ canDelete = false }: { canDelete?: boolean }) {
   const [assessments, setAssessments] = useState<ApiAssessment[]>([]);
   const [classes, setClasses] = useState<ApiClass[]>([]);
   const [subjects, setSubjects] = useState<ApiSubject[]>([]);
@@ -104,6 +105,9 @@ export function AssessmentsPage() {
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const [deleteCandidate, setDeleteCandidate] = useState<ApiAssessment | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -258,6 +262,36 @@ export function AssessmentsPage() {
       }));
     } finally {
       setSubmitting(false);
+    }
+  };
+
+  const requestDelete = (item: ApiAssessment) => {
+    setOpenMenu(null);
+    setDeleteError(null);
+    setDeleteCandidate(item);
+  };
+
+  const deleteAssessment = async () => {
+    if (!deleteCandidate) return;
+
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/assessments/${deleteCandidate.id}`, {
+        method: "DELETE",
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.message || `Gagal menghapus assessment (HTTP ${response.status}).`);
+      }
+
+      setDeleteCandidate(null);
+      setNotice("Assessment berhasil dihapus permanen.");
+      await fetchData();
+    } catch (err: unknown) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus assessment.");
+    } finally {
+      setDeletePending(false);
     }
   };
 
@@ -452,6 +486,8 @@ export function AssessmentsPage() {
                       openMenu={openMenu}
                       setOpenMenu={setOpenMenu}
                       onEdit={openEdit}
+                      canDelete={canDelete}
+                      onDelete={requestDelete}
                     />
                   ))}
                 </tbody>
@@ -466,6 +502,8 @@ export function AssessmentsPage() {
                   openMenu={openMenu}
                   setOpenMenu={setOpenMenu}
                   onEdit={openEdit}
+                  canDelete={canDelete}
+                  onDelete={requestDelete}
                 />
               ))}
             </div>
@@ -484,6 +522,20 @@ export function AssessmentsPage() {
           onChange={(field, val) => setForm((c) => ({ ...c, [field]: val }))}
           onSubmit={submit}
           onClose={() => setModal(null)}
+        />
+      )}
+      {deleteCandidate && (
+        <DeleteConfirmationDialog
+          title="Hapus assessment ini?"
+          recordName={deleteCandidate.name}
+          description="Assessment ini masih berstatus OPEN dan belum memiliki nilai. Data assessment akan dihapus permanen."
+          confirmLabel="Hapus Permanen"
+          pending={deletePending}
+          error={deleteError}
+          onCancel={() => {
+            if (!deletePending) setDeleteCandidate(null);
+          }}
+          onConfirm={deleteAssessment}
         />
       )}
     </div>
@@ -528,11 +580,15 @@ function AssessmentRow({
   openMenu,
   setOpenMenu,
   onEdit,
+  canDelete,
+  onDelete,
 }: {
   item: ApiAssessment;
   openMenu: string | null;
   setOpenMenu: (id: string | null) => void;
   onEdit: (item: ApiAssessment) => void;
+  canDelete: boolean;
+  onDelete: (item: ApiAssessment) => void;
 }) {
   return (
     <tr className="hover:bg-slate-50/50">
@@ -558,6 +614,8 @@ function AssessmentRow({
           openMenu={openMenu}
           setOpenMenu={setOpenMenu}
           onEdit={onEdit}
+          canDelete={canDelete}
+          onDelete={onDelete}
         />
       </td>
     </tr>
@@ -569,11 +627,15 @@ function AssessmentCard({
   openMenu,
   setOpenMenu,
   onEdit,
+  canDelete,
+  onDelete,
 }: {
   item: ApiAssessment;
   openMenu: string | null;
   setOpenMenu: (id: string | null) => void;
   onEdit: (item: ApiAssessment) => void;
+  canDelete: boolean;
+  onDelete: (item: ApiAssessment) => void;
 }) {
   return (
     <article className="p-5">
@@ -598,6 +660,8 @@ function AssessmentCard({
           openMenu={openMenu}
           setOpenMenu={setOpenMenu}
           onEdit={onEdit}
+          canDelete={canDelete}
+          onDelete={onDelete}
         />
       </div>
     </article>
@@ -609,12 +673,23 @@ function Actions({
   openMenu,
   setOpenMenu,
   onEdit,
+  canDelete,
+  onDelete,
 }: {
   item: ApiAssessment;
   openMenu: string | null;
   setOpenMenu: (id: string | null) => void;
   onEdit: (item: ApiAssessment) => void;
+  canDelete: boolean;
+  onDelete: (item: ApiAssessment) => void;
 }) {
+  const scoreCount = item._count?.scores ?? 0;
+  const blockedReason = item.status === AssessmentSessionStatus.COMPLETED
+    ? "Assessment COMPLETED tidak dapat dihapus."
+    : scoreCount > 0
+      ? `Assessment memiliki ${scoreCount} nilai.`
+      : null;
+
   return (
     <div className="flex items-center gap-1">
       <Link
@@ -634,7 +709,7 @@ function Actions({
           <MoreHorizontal className="size-4" />
         </button>
         {openMenu === item.id && (
-          <div className="absolute right-0 top-10 z-10 w-32 rounded-lg border border-slate-200 bg-white p-1 text-xs shadow-lg">
+          <div className="absolute right-0 top-10 z-10 w-56 rounded-lg border border-slate-200 bg-white p-1 text-xs shadow-lg">
             <Link
               href={`/assessments/${item.id}`}
               className="block rounded-md px-3 py-2 hover:bg-slate-50 font-medium"
@@ -648,6 +723,25 @@ function Actions({
             >
               Edit Info
             </button>
+            {canDelete && (
+              <>
+                <button
+                  type="button"
+                  disabled={Boolean(blockedReason)}
+                  title={blockedReason ?? undefined}
+                  onClick={() => onDelete(item)}
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-white"
+                >
+                  <Trash2 className="size-3.5" />
+                  Hapus
+                </button>
+                {blockedReason && (
+                  <p className="px-3 pb-2 text-[10px] leading-4 text-slate-500">
+                    {blockedReason}
+                  </p>
+                )}
+              </>
+            )}
           </div>
         )}
       </div>

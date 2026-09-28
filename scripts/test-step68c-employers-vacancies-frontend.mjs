@@ -1,13 +1,20 @@
-// scripts/test-step68c-employers-vacancies-frontend.mjs
+﻿// scripts/test-step68c-employers-vacancies-frontend.mjs
 // Step 68C: Employer & Vacancy Frontend Integration & Hardening Test Suite
 
 import fs from "fs";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP68C_EMPLOYERS_VACANCIES_FRONTEND_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP68C_EMPLOYERS_VACANCIES_FRONTEND_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -550,7 +557,7 @@ async function run() {
     record("26.9 Classes = 10", 10, classesCount);
     record("26.10 Schedules = 10", 10, schedulesCount);
     record("26.11 Instructors = 6", 6, instructorsCount);
-    record("26.12 Users = 2", 2, usersCount);
+    record("26.12 Users = 3", 3, usersCount /* Updated STEP 88 */);
 
     console.log("\n==========================================");
     console.log(`ALL ${results.length} TESTS FINISHED!`);

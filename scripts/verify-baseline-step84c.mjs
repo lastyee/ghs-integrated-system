@@ -68,7 +68,7 @@ async function main() {
 
   // Expected baseline
   const expected = {
-    users: 2,
+    users: 1, // Updated in STEP 88: demo accounts removed, only real SUPER_ADMIN remains
     instructors: 6,
     programs: 1,
     batches: 2,
@@ -164,7 +164,7 @@ async function main() {
   const allUsers = await prisma.user.findMany({
     include: { role: true, student: true },
   });
-  console.log(`- Users in system: ${allUsers.map(u => `${u.email} (${u.role.name})`).join(", ")}`);
+  console.log(`- Users in system: ${allUsers.map(u => `${u.email} (${u.role.name})`).join(", ")} [Real SUPER_ADMIN only after STEP 88]`);
 
   const refIntegrityPass =
     studentsWithoutEnrollment.length === 0 &&

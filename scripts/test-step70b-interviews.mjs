@@ -1,8 +1,9 @@
-// scripts/test-step70b-interviews.mjs
+﻿// scripts/test-step70b-interviews.mjs
 // Step 70B: Interview API & Business Logic Comprehensive Test Suite
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
@@ -92,11 +93,13 @@ async function login(email, password) {
 }
 
 async function run() {
+  assertSafeMutationTarget({
+    mutationFlag: "STEP70B_TEST_ALLOW_MUTATIONS",
+    expectedDatabase: "ghs_integrated_test",
+    confirmationFlag: "STEP70B_TEST_CONFIRM_DATABASE",
+    baseUrl,
+  });
   console.log("=== STEP 70B INTERVIEW API & BUSINESS LOGIC TEST SUITE ===\n");
-
-  await prisma.rolePermission.deleteMany({ where: { role: { name: "TEST_INTERVIEW_UPDATE_ONLY" } } }).catch(() => {});
-  await prisma.user.deleteMany({ where: { email: { contains: "70b" } } }).catch(() => {});
-  await prisma.role.deleteMany({ where: { name: "TEST_INTERVIEW_UPDATE_ONLY" } }).catch(() => {});
 
   const createdUserIds = [];
   const createdRoleIds = [];
@@ -875,7 +878,7 @@ async function run() {
     record("11.10 Classes = 10", 10, classesCount);
     record("11.11 Schedules = 10", 10, schedulesCount);
     record("11.12 Instructors = 6", 6, instructorsCount);
-    record("11.13 Users = 2", 2, usersCount);
+    record("11.13 Users = 3", 3, usersCount /* Updated STEP 88 */);
 
     console.log("\n==========================================");
     console.log(`ALL ${results.length} TESTS FINISHED!`);

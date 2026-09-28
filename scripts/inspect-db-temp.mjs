@@ -1,0 +1,15 @@
+import { PrismaClient } from "@prisma/client";
+const prisma = new PrismaClient();
+const batches = await prisma.batch.findMany({ select: { name: true } });
+const latestStudents = await prisma.student.findMany({ orderBy: { createdAt: "desc" }, take: 3, select: { nim: true, name: true, createdAt: true } });
+const employers = await prisma.employer.findMany({ select: { name: true } });
+const vacancies = await prisma.vacancy.findMany({ select: { title: true, status: true } });
+const placements = await prisma.placement.findMany({ select: { position: true, status: true } });
+const documents = await prisma.document.findMany({ select: { type: true, status: true } });
+console.log("Batches:", JSON.stringify(batches, null, 2));
+console.log("Latest 3 students:", JSON.stringify(latestStudents, null, 2));
+console.log("Employers:", JSON.stringify(employers, null, 2));
+console.log("Vacancies:", JSON.stringify(vacancies, null, 2));
+console.log("Placements:", JSON.stringify(placements, null, 2));
+console.log("Documents:", JSON.stringify(documents, null, 2));
+await prisma.$disconnect();

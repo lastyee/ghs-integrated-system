@@ -1,11 +1,18 @@
-// scripts/test-step72c-final-e2e.mjs
+﻿// scripts/test-step72c-final-e2e.mjs
 // Step 72C: Final End-to-End Application Verification Suite
 // Tests actual HTTP/session/route behavior across all application flows.
 
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP72C_FINAL_E2E_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP72C_FINAL_E2E_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -125,7 +132,7 @@ async function run() {
     record("Initial Baseline: Classes is 10", 10, initialCounts.classes, "BASELINE");
     record("Initial Baseline: Schedules is 10", 10, initialCounts.schedules, "BASELINE");
     record("Initial Baseline: Instructors is 6", 6, initialCounts.instructors, "BASELINE");
-    record("Initial Baseline: Users is 2", 2, initialCounts.users, "BASELINE");
+    record("Initial Baseline: Users is 3", 3, initialCounts.users, "BASELINE" /* Updated STEP 88 */);
 
     // ========================================================
     // 1. Unauthenticated Security Flow E2E
@@ -399,7 +406,7 @@ async function run() {
     record("Final Baseline: Classes remains 10", 10, finalCounts.classes, "DB_INTEGRITY");
     record("Final Baseline: Schedules remains 10", 10, finalCounts.schedules, "DB_INTEGRITY");
     record("Final Baseline: Instructors remains 6", 6, finalCounts.instructors, "DB_INTEGRITY");
-    record("Final Baseline: Users remains 2", 2, finalCounts.users, "DB_INTEGRITY");
+    record("Final Baseline: Users remains 3", 3, finalCounts.users, "DB_INTEGRITY" /* Updated STEP 88 */);
 
   } catch (error) {
     console.error("Test execution encountered an error:", error);

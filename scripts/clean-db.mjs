@@ -1,21 +1,61 @@
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
+const fixtureModels = [
+  "assessmentScore",
+  "assessment",
+  "attendance",
+  "schedule",
+  "class",
+  "certificate",
+  "placement",
+  "interview",
+  "application",
+  "vacancy",
+  "employer",
+  "document",
+  "user",
+];
 
 async function main() {
-  await prisma.assessmentScore.deleteMany();
-  await prisma.assessment.deleteMany();
-  await prisma.attendance.deleteMany();
-  await prisma.schedule.deleteMany({ where: { class: { name: { contains: "82" } } } });
-  await prisma.class.deleteMany({ where: { name: { contains: "82" } } });
-  await prisma.certificate.deleteMany();
-  await prisma.placement.deleteMany();
-  await prisma.interview.deleteMany();
-  await prisma.application.deleteMany();
-  await prisma.vacancy.deleteMany();
-  await prisma.employer.deleteMany();
-  await prisma.document.deleteMany();
-  await prisma.user.deleteMany({ where: { email: { contains: ".test82@ghs.local" } } });
+  assertSafeMutationTarget({
+    mutationFlag: "CLEAN_DB_ALLOW_DESTRUCTIVE",
+    expectedDatabase: "ghs_integrated_test",
+    confirmationFlag: "CLEAN_DB_CONFIRM_DATABASE",
+  });
+
+  const fixtureIdsJson = process.env.CLEAN_DB_FIXTURE_IDS_JSON;
+  if (!fixtureIdsJson) {
+    throw new Error("CLEAN_DB_FIXTURE_IDS_JSON must contain exact IDs created by the test invocation.");
+  }
+
+  let fixtureIds;
+  try {
+    fixtureIds = JSON.parse(fixtureIdsJson);
+  } catch {
+    throw new Error("CLEAN_DB_FIXTURE_IDS_JSON must be valid JSON.");
+  }
+  if (!fixtureIds || typeof fixtureIds !== "object" || Array.isArray(fixtureIds)) {
+    throw new Error("CLEAN_DB_FIXTURE_IDS_JSON must be an object keyed by Prisma model.");
+  }
+  const unknownModels = Object.keys(fixtureIds).filter((model) => !fixtureModels.includes(model));
+  if (unknownModels.length) {
+    throw new Error(`Fixture cleanup does not allow these models: ${unknownModels.join(", ")}.`);
+  }
+  for (const [model, ids] of Object.entries(fixtureIds)) {
+    if (!Array.isArray(ids) || ids.length === 0 || ids.some((id) => typeof id !== "string" || !id.trim())) {
+      throw new Error(`${model} fixture IDs must be a non-empty array of exact IDs.`);
+    }
+  }
+
+  console.warn("Cleaning only exact fixture IDs from the disposable ghs_integrated_test database; AuditLogs are retained.");
+  for (const model of fixtureModels) {
+    const ids = fixtureIds[model];
+    if (!ids) continue;
+    const result = await prisma[model].deleteMany({ where: { id: { in: ids } } });
+    console.log(`${model}: deleted ${result.count} exact fixture row(s).`);
+  }
 
   const [u, i, pr, b, st, e, su, c, sc, em, v, a, it, pl, d, ce] = await Promise.all([
     prisma.user.count(),
@@ -46,4 +86,9 @@ async function main() {
   await prisma.$disconnect();
 }
 
-main().catch(console.error);
+main()
+  .catch((error) => {
+    console.error("Disposable fixture cleanup failed:", error);
+    process.exitCode = 1;
+  })
+  .finally(() => prisma.$disconnect());

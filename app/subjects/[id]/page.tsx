@@ -14,7 +14,7 @@ export default async function SubjectDetailRoute({ params }: { params: Promise<{
       activeLabel="Mata Pelajaran"
       sidebarVariant={isStudent ? "student" : "staff"}
     >
-      <SubjectDetail subjectId={id} />
+      <SubjectDetail subjectId={id} userRole={user.role} />
     </AppShell>
   );
 }

@@ -1,13 +1,20 @@
-// scripts/test-step70c-interviews-frontend.mjs
+﻿// scripts/test-step70c-interviews-frontend.mjs
 // Step 70C: Interview Frontend & Real API Integration Test Suite
 
 import fs from "fs";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP70C_INTERVIEWS_FRONTEND_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP70C_INTERVIEWS_FRONTEND_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -742,7 +749,7 @@ async function run() {
     console.log(`Classes:     ${classesCount} (expected 10)`);
     console.log(`Schedules:   ${schedulesCount} (expected 10)`);
     console.log(`Instructors: ${instructorsCount} (expected 6)`);
-    console.log(`Users:       ${usersCount} (expected 2)`);
+    console.log(`Users:       ${usersCount} (expected 3)`);
 
     record("Baseline Employers == 0", 0, employersCount);
     record("Baseline Vacancies == 0", 0, vacanciesCount);
@@ -756,7 +763,7 @@ async function run() {
     record("Baseline Classes == 10", 10, classesCount);
     record("Baseline Schedules == 10", 10, schedulesCount);
     record("Baseline Instructors == 6", 6, instructorsCount);
-    record("Baseline Users == 2", 2, usersCount);
+    record("Baseline Users == 3", 3, usersCount /* Updated STEP 88 */);
   }
 
   const failedCount = results.filter((r) => !r.passed).length;

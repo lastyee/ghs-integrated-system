@@ -1,12 +1,15 @@
 // scripts/test-step67c-documents-hardening.mjs
 // Step 67C: Documents Security & Storage Hardening Test Suite
 
+import { randomUUID } from "node:crypto";
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { MockStorageProvider, SupabaseStorageProvider } from "../lib/storage.ts";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+const runId = randomUUID().replaceAll("-", "");
 
 const results = [];
 
@@ -89,14 +92,69 @@ async function login(email, password) {
 }
 
 async function run() {
+  assertSafeMutationTarget({
+    mutationFlag: "STEP67C_TEST_ALLOW_MUTATIONS",
+    expectedDatabase: "ghs_integrated_test",
+    confirmationFlag: "STEP67C_TEST_CONFIRM_DATABASE",
+    baseUrl,
+  });
   console.log("=== STEP 67C DOCUMENTS SECURITY & STORAGE HARDENING TEST SUITE ===\n");
-
-  await prisma.user.deleteMany({ where: { email: { contains: "67c" } } }).catch(() => {});
 
   const createdUserIds = [];
   const createdDocumentIds = [];
+  let createdStoragePaths = new Map();
+  const createdStorageKeys = new Set();
+  let initialStorageKeys = [];
   let studentA;
   let studentB;
+  let adminCookies = "";
+
+  function trackCreatedDocument(document) {
+    if (typeof document.id !== "string" || typeof document.storagePath !== "string") {
+      throw new Error("Uploaded fixture response did not include an ID and storagePath.");
+    }
+    createdDocumentIds.push(document.id);
+    createdStoragePaths.set(document.id, document.storagePath);
+    createdStorageKeys.add(`documents/${document.storagePath}`);
+  }
+
+  async function cleanupCreatedDocuments() {
+    for (const documentId of createdDocumentIds) {
+      const document = await prisma.document.findUnique({
+        where: { id: documentId },
+        select: { id: true, status: true, storagePath: true, fileName: true },
+      });
+      if (!document) continue;
+      if (!document.fileName.startsWith(`step67c-${runId}-`)) {
+        throw new Error(`Refusing to clean Document ${documentId}: fixture identity does not match this run.`);
+      }
+
+      if (document.status === "VERIFIED") {
+        await prisma.document.update({
+          where: { id: documentId },
+          data: { status: "PENDING", verifiedById: null, verifiedAt: null },
+        });
+      }
+
+      const response = await request(`/api/documents/${documentId}`, {
+        method: "DELETE",
+        headers: { Cookie: adminCookies },
+      });
+      if (response.status !== 200) {
+        throw new Error(`Exact fixture Document cleanup failed for ${documentId}: HTTP ${response.status}.`);
+      }
+      if (document.storagePath !== createdStoragePaths.get(documentId)) {
+        throw new Error(`Document ${documentId} storage path changed after fixture creation.`);
+      }
+      const remaining = await prisma.document.findUnique({
+        where: { id: documentId },
+        select: { id: true },
+      });
+      if (remaining) throw new Error(`Document fixture ${documentId} remains after exact API cleanup.`);
+    }
+    createdDocumentIds.length = 0;
+    createdStoragePaths = new Map();
+  }
 
   try {
     const tempPassword = "password123!";
@@ -134,26 +192,36 @@ async function run() {
       studentPassword
     );
 
+    const initialStorageResponse = await request("/api/documents?testStorageStatus=true", {
+      headers: { Cookie: superAdminCookies },
+    });
+    if (!initialStorageResponse.ok) throw new Error("Unable to capture initial MockStorage keys.");
+    const initialStorageStatus = await initialStorageResponse.json();
+    if (!Array.isArray(initialStorageStatus.keys)) {
+      throw new Error("Target application is not using MockStorageProvider.");
+    }
+    initialStorageKeys = initialStorageStatus.keys;
+
     console.log("2. Creating temporary RBAC test users...");
-    const adminUser = await createTempUser("ADMIN", "test.admin67c@ghs.test");
+    const adminUser = await createTempUser("ADMIN", `test.admin67c-${runId}@ghs.test`);
     const academicUser = await createTempUser(
       "ACADEMIC_STAFF",
-      "test.academic67c@ghs.test"
+      `test.academic67c-${runId}@ghs.test`
     );
     const managementUser = await createTempUser(
       "MANAGEMENT",
-      "test.management67c@ghs.test"
+      `test.management67c-${runId}@ghs.test`
     );
     const placementUser = await createTempUser(
       "PLACEMENT_STAFF",
-      "test.placement67c@ghs.test"
+      `test.placement67c-${runId}@ghs.test`
     );
     const instructorUser = await createTempUser(
       "INSTRUCTOR",
-      "test.instructor67c@ghs.test"
+      `test.instructor67c-${runId}@ghs.test`
     );
 
-    const adminCookies = await login(adminUser.email, tempPassword);
+    adminCookies = await login(adminUser.email, tempPassword);
     const academicCookies = await login(academicUser.email, tempPassword);
     const managementCookies = await login(managementUser.email, tempPassword);
     const placementCookies = await login(placementUser.email, tempPassword);
@@ -191,7 +259,7 @@ async function run() {
       new Blob([Buffer.from("%PDF-1.4 Valid PDF file content")], {
         type: "application/pdf",
       }),
-      "resume.pdf"
+      `step67c-${runId}-resume.pdf`
     );
     form1.append("studentId", studentA.id);
 
@@ -202,7 +270,7 @@ async function run() {
     });
     record("1. valid PDF accepted", 201, res1.status);
     const doc1Data = await res1.json();
-    createdDocumentIds.push(doc1Data.id);
+    trackCreatedDocument(doc1Data);
 
     // 2. valid PNG accepted -> 201
     const pngHeader = Buffer.from([
@@ -214,7 +282,7 @@ async function run() {
     form2.append(
       "file",
       new Blob([pngHeader], { type: "image/png" }),
-      "identity.png"
+      `step67c-${runId}-identity.png`
     );
     form2.append("studentId", studentA.id);
 
@@ -225,7 +293,7 @@ async function run() {
     });
     record("2. valid PNG accepted", 201, res2.status);
     const doc2Data = await res2.json();
-    createdDocumentIds.push(doc2Data.id);
+    trackCreatedDocument(doc2Data);
 
     // 3. valid JPEG accepted -> 201
     const jpegHeader = Buffer.from([
@@ -236,7 +304,7 @@ async function run() {
     form3.append(
       "file",
       new Blob([jpegHeader], { type: "image/jpeg" }),
-      "cert.jpg"
+      `step67c-${runId}-cert.jpg`
     );
     form3.append("studentId", studentA.id);
 
@@ -247,7 +315,7 @@ async function run() {
     });
     record("3. valid JPEG accepted", 201, res3.status);
     const doc3Data = await res3.json();
-    createdDocumentIds.push(doc3Data.id);
+    trackCreatedDocument(doc3Data);
 
     // 4. fake PDF rejected -> 400
     const form4 = new FormData();
@@ -401,7 +469,7 @@ async function run() {
       new Blob([Buffer.from("%PDF-1.4 forced failure payload")], {
         type: "application/pdf",
       }),
-      "passport_fail.pdf"
+      `step67c-${runId}-passport_fail.pdf`
     );
     formFail.append("studentId", studentA.id);
 
@@ -431,13 +499,23 @@ async function run() {
     const uploadHappened = uploadsAfterCount === uploadsBeforeCount + 1;
     const lastUploadedKey =
       statusAfter.uploadHistory[statusAfter.uploadHistory.length - 1];
+    if (uploadHappened) {
+      const expectedFixturePrefix = `documents/students/${studentA.id}/doc_`;
+      if (
+        typeof lastUploadedKey !== "string" ||
+        !lastUploadedKey.startsWith(expectedFixturePrefix)
+      ) {
+        throw new Error("New MockStorage object did not match the fixture student and document path.");
+      }
+      createdStorageKeys.add(lastUploadedKey);
+    }
     record("13. storage upload happened", true, uploadHappened);
 
     // 14. Document record absent in DB
     const failedDbRecord = await prisma.document.findFirst({
       where: {
         studentId: studentA.id,
-        fileName: "passport_fail.pdf",
+        fileName: `step67c-${runId}-passport_fail.pdf`,
       },
     });
     record("14. Document record absent", null, failedDbRecord);
@@ -459,7 +537,7 @@ async function run() {
         action: "UPLOAD",
         changes: {
           path: ["fileName"],
-          equals: "passport_fail.pdf",
+          equals: `step67c-${runId}-passport_fail.pdf`,
         },
       },
     });
@@ -490,14 +568,27 @@ async function run() {
     // 19. no filesystem fallback
     // Verify MockStorageProvider is purely in-memory (Map based) and does not touch fs
     const mockStorageInstance = new MockStorageProvider();
+    const unrelatedPath = `step67c/${runId}/unrelated.pdf`;
+    const fixturePath = `step67c/${runId}/fixture.pdf`;
     await mockStorageInstance.upload({
       bucket: "documents",
-      path: "test/mem.pdf",
+      path: unrelatedPath,
       file: Buffer.from("%PDF-1.4"),
       contentType: "application/pdf",
     });
-    const hasObjectInMemory = mockStorageInstance.has("documents", "test/mem.pdf");
+    await mockStorageInstance.upload({
+      bucket: "documents",
+      path: fixturePath,
+      file: Buffer.from("%PDF-1.4 fixture"),
+      contentType: "application/pdf",
+    });
+    const hasObjectInMemory = mockStorageInstance.has("documents", fixturePath);
     record("19. no filesystem fallback", true, hasObjectInMemory);
+    const fixtureDelete = await mockStorageInstance.delete({ bucket: "documents", path: fixturePath });
+    record("19b. exact-path cleanup removes this fixture", fixtureDelete.outcome === "deleted" &&
+      !mockStorageInstance.has("documents", fixturePath));
+    record("19c. exact-path cleanup preserves unrelated object", mockStorageInstance.has("documents", unrelatedPath));
+    await mockStorageInstance.delete({ bucket: "documents", path: unrelatedPath });
 
     // ==========================================
     // PART H: SIGNED URL REGRESSION (Tests 20 - 23)
@@ -556,7 +647,7 @@ async function run() {
       new Blob([Buffer.from("%PDF-1.4 studentB document")], {
         type: "application/pdf",
       }),
-      "student_b.pdf"
+      `step67c-${runId}-student_b.pdf`
     );
     formB.append("studentId", studentB.id);
 
@@ -566,7 +657,7 @@ async function run() {
       body: formB,
     });
     const docBData = await resDocB.json();
-    createdDocumentIds.push(docBData.id);
+    trackCreatedDocument(docBData);
 
     // 24. Student A cannot access Student B (list query)
     const resIdorList = await request(
@@ -611,7 +702,7 @@ async function run() {
       new Blob([Buffer.from("%PDF-1.4 path test")], {
         type: "application/pdf",
       }),
-      "path_test.pdf"
+      `step67c-${runId}-path_test.pdf`
     );
     formTamperPath.append("studentId", studentA.id);
     formTamperPath.append("storagePath", "malicious/override/etc/passwd.pdf");
@@ -622,7 +713,7 @@ async function run() {
       body: formTamperPath,
     });
     const tamperData = await resTamper.json();
-    createdDocumentIds.push(tamperData.id);
+    trackCreatedDocument(tamperData);
     record(
       "27. storage path cannot be manipulated",
       true,
@@ -748,12 +839,12 @@ async function run() {
     });
     record("37. collection DELETE -> 405", 405, resDelColl.status);
 
-    // 38. detail DELETE -> 405
+    // 38. VERIFIED document DELETE is blocked by the current policy.
     const resDelDetail = await request(`/api/documents/${doc1Data.id}`, {
       method: "DELETE",
       headers: { Cookie: adminCookies },
     });
-    record("38. detail DELETE -> 405", 405, resDelDetail.status);
+    record("38. VERIFIED detail DELETE is blocked", 409, resDelDetail.status);
 
     // ==========================================
     // PART K: AUDIT LOG REGRESSION (Tests 39 - 45)
@@ -785,7 +876,7 @@ async function run() {
         action: "UPLOAD",
         changes: {
           path: ["fileName"],
-          equals: "passport_fail.pdf",
+          equals: `step67c-${runId}-passport_fail.pdf`,
         },
       },
     });
@@ -822,27 +913,15 @@ async function run() {
     // ==========================================
     console.log("\nSection: CLEANUP & VERIFICATION");
 
-    // Clean up all created documents and audit logs
-    if (createdDocumentIds.length > 0) {
-      await prisma.auditLog.deleteMany({
-        where: { entityId: { in: createdDocumentIds } },
-      });
-      await prisma.document.deleteMany({
-        where: { id: { in: createdDocumentIds } },
-      });
-    }
+    await cleanupCreatedDocuments();
 
     // Clean up temporary users
     if (createdUserIds.length > 0) {
       await prisma.user.deleteMany({
         where: { id: { in: createdUserIds } },
       });
+      createdUserIds.length = 0;
     }
-
-    // Clear MockStorageProvider objects via testStorageStatus?clear=true using superAdminCookies
-    await request("/api/documents?testStorageStatus=true&clear=true", {
-      headers: { Cookie: superAdminCookies },
-    });
 
     // Check DB counts
     const residualDocs = await prisma.document.count();
@@ -869,15 +948,18 @@ async function run() {
       headers: { Cookie: superAdminCookies },
     });
     const finalStorage = await finalStorageRes.json();
-    console.log(`Residual Storage Objects: ${finalStorage.count}`);
-
-    if (finalStorage.count !== 0) {
-      throw new Error(`Expected 0 residual storage objects, got ${finalStorage.count}`);
+    const finalKeys = new Set(finalStorage.keys || []);
+    const initialObjectsRemain = initialStorageKeys.every((key) => finalKeys.has(key));
+    const createdObjectsRemoved = [...createdStorageKeys].every((key) => !finalKeys.has(key));
+    record("Exact fixture cleanup removes only objects created by this run", true,
+      initialObjectsRemain && createdObjectsRemoved);
+    if (!initialObjectsRemain || !createdObjectsRemoved) {
+      throw new Error("MockStorage fixture cleanup changed an initial object or left a run-owned object behind.");
     }
     if (residualDocs !== 0) {
       throw new Error(`Expected 0 residual documents in DB, got ${residualDocs}`);
     }
-    if (studentsCount !== 21 || enrollmentsCount !== 21 || subjectsCount !== 6 || classesCount !== 10 || schedulesCount !== 10 || instructorsCount !== 6 || usersCount !== 2) {
+    if (studentsCount !== 21 || enrollmentsCount !== 21 || subjectsCount !== 6 || classesCount !== 10 || schedulesCount !== 10 || instructorsCount !== 6 || usersCount !== 3) { // Updated in STEP 88: real SUPER_ADMIN + 2 test fixtures
       throw new Error(`Database baseline counts mismatch!`);
     }
 
@@ -888,25 +970,30 @@ async function run() {
     console.log("==========================================");
 
     if (!allPassed) {
-      process.exit(1);
+      throw new Error("One or more Step 67C assertions failed.");
     }
   } catch (err) {
     console.error("Test execution failed:", err);
-    process.exit(1);
+    process.exitCode = 1;
   } finally {
     // Safety cleanup in case of unexpected errors
     if (createdDocumentIds.length > 0) {
-      await prisma.auditLog
-        .deleteMany({ where: { entityId: { in: createdDocumentIds } } })
-        .catch(() => {});
-      await prisma.document
-        .deleteMany({ where: { id: { in: createdDocumentIds } } })
-        .catch(() => {});
+      try {
+        if (!adminCookies) throw new Error("No authenticated fixture cleanup session was established.");
+        await cleanupCreatedDocuments();
+      } catch (cleanupError) {
+        console.error("Exact fixture document/storage cleanup failed:", cleanupError);
+        process.exitCode = 1;
+      }
     }
     if (createdUserIds.length > 0) {
-      await prisma.user
-        .deleteMany({ where: { id: { in: createdUserIds } } })
-        .catch(() => {});
+      try {
+        await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
+        createdUserIds.length = 0;
+      } catch (cleanupError) {
+        console.error("Exact fixture user cleanup failed:", cleanupError);
+        process.exitCode = 1;
+      }
     }
     await prisma.$disconnect();
   }

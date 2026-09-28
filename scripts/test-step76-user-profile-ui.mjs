@@ -1,11 +1,18 @@
-// scripts/test-step76-user-profile-ui.mjs
+﻿// scripts/test-step76-user-profile-ui.mjs
 // Step 76: User Account, Student Profile & Global GHS UI Verification Suite
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
-const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP76_USER_PROFILE_UI_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP76_USER_PROFILE_UI_CONFIRM_DATABASE",
+});
+const prisma = new PrismaClient();
 
 const results = [];
 
@@ -383,7 +390,7 @@ async function main() {
       prisma.certificate.count(),
     ]);
 
-    record("Baseline Users = 2", 2, userCount, "BASELINE");
+    record("Baseline Users = 3", 3, userCount, "BASELINE" /* Updated STEP 88 */);
     record("Baseline Instructors = 6", 6, instructorCount, "BASELINE");
     record("Baseline Programs = 1", 1, programCount, "BASELINE");
     record("Baseline Batches = 2", 2, batchCount, "BASELINE");

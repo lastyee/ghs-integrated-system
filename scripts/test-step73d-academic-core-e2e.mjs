@@ -1,13 +1,20 @@
-// scripts/test-step73d-academic-core-e2e.mjs
+﻿// scripts/test-step73d-academic-core-e2e.mjs
 // Step 73D: Academic Core Integration Audit & E2E Hardening Test Suite
 
 import fs from "fs";
 import path from "path";
 import { PrismaClient } from "@prisma/client";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 import bcrypt from "bcryptjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP73D_ACADEMIC_CORE_E2E_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP73D_ACADEMIC_CORE_E2E_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -139,7 +146,7 @@ async function run() {
     };
 
     console.log("Initial baseline counts:", initialCounts);
-    record("0.1 baseline Users count is 2", 2, initialCounts.users, "BASELINE");
+    record("0.1 baseline Users count is 3", 3, initialCounts.users, "BASELINE" /* Updated STEP 88 */);
     record("0.2 baseline Instructors count is 6", 6, initialCounts.instructors, "BASELINE");
     record("0.3 baseline Programs count is 1", 1, initialCounts.programs, "BASELINE");
     record("0.4 baseline Batches count is 2", 2, initialCounts.batches, "BASELINE");

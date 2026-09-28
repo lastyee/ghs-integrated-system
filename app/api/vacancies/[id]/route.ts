@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   AuthorizationError,
   authorizationErrorResponse,
@@ -192,9 +192,80 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { message: "Method Not Allowed. Vacancy deletion is not permitted." },
-    { status: 405, headers: { Allow: "GET, PATCH" } }
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("vacancy:delete");
+    const { id } = await params;
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const vacancy = await transaction.vacancy.findUnique({
+        where: { id },
+        select: {
+          id: true,
+          title: true,
+          _count: { select: { applications: true, placements: true } },
+        },
+      });
+
+      if (!vacancy) return { kind: "not-found" as const };
+
+      const dependencies = vacancy._count;
+      if (dependencies.applications > 0 || dependencies.placements > 0) {
+        return { kind: "blocked" as const, vacancy, dependencies };
+      }
+
+      await transaction.vacancy.delete({ where: { id } });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Vacancy",
+        entityId: vacancy.id,
+        changes: { deleted: { title: vacancy.title }, dependencies },
+      });
+
+      return { kind: "deleted" as const, id: vacancy.id, title: vacancy.title };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (result.kind === "not-found") {
+      return Response.json({ message: "Vacancy not found." }, { status: 404 });
+    }
+    if (result.kind === "blocked") {
+      return Response.json(
+        {
+          message: `Vacancy "${result.vacancy.title}" cannot be deleted because it still has dependent records.`,
+          dependencies: result.dependencies,
+        },
+        { status: 409 },
+      );
+    }
+
+    return Response.json({ data: result }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === "P2025") {
+        return Response.json({ message: "Vacancy not found." }, { status: 404 });
+      }
+      if (error.code === "P2003" || error.code === "P2034") {
+        const { id } = await params;
+        const [applications, placements] = await Promise.all([
+          prisma.application.count({ where: { vacancyId: id } }),
+          prisma.placement.count({ where: { vacancyId: id } }),
+        ]);
+        return Response.json(
+          {
+            message: "Vacancy cannot be deleted because dependent records changed during the request.",
+            dependencies: { applications, placements },
+          },
+          { status: 409 },
+        );
+      }
+    }
+    console.error("DELETE /api/vacancies/[id] error:", error);
+    return Response.json({ message: "Internal server error." }, { status: 500 });
+  }
 }

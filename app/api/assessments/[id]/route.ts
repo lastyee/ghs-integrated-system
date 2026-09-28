@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   AuthorizationError,
   authorizationErrorResponse,
@@ -249,9 +249,103 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { message: "Method Not Allowed. Assessment deletion is not supported." },
-    { status: 405, headers: { Allow: "GET, PATCH" } }
-  );
+export async function DELETE(
+  _request: Request,
+  props: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("assessment:delete");
+    if (!["SUPER_ADMIN", "ADMIN", "ACADEMIC_STAFF"].includes(authenticatedUser.role)) {
+      throw new ForbiddenError();
+    }
+
+    const { id } = await props.params;
+    if (!id.trim()) {
+      return Response.json({ message: "Invalid assessment ID." }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(
+      async (transaction) => {
+        const assessment = await transaction.assessment.findUnique({
+          where: { id },
+          select: {
+            id: true,
+            name: true,
+            classId: true,
+            subjectId: true,
+            status: true,
+            _count: { select: { scores: true } },
+          },
+        });
+
+        if (!assessment) {
+          return { status: "not-found" as const };
+        }
+
+        if (assessment.status !== "OPEN" || assessment._count.scores > 0) {
+          return {
+            status: "blocked" as const,
+            assessmentStatus: assessment.status,
+            scoreCount: assessment._count.scores,
+          };
+        }
+
+        await transaction.assessment.delete({ where: { id } });
+        await createAuditLog(transaction, authenticatedUser, {
+          action: "ASSESSMENT_DELETE",
+          entity: "Assessment",
+          entityId: id,
+          changes: {
+            name: assessment.name,
+            classId: assessment.classId,
+            subjectId: assessment.subjectId,
+            status: assessment.status,
+            scoreCount: assessment._count.scores,
+          },
+        });
+
+        return { status: "deleted" as const };
+      },
+      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+    );
+
+    if (result.status === "not-found") {
+      return Response.json({ message: "Assessment not found." }, { status: 404 });
+    }
+    if (result.status === "blocked") {
+      const message = result.assessmentStatus === "COMPLETED"
+        ? "Completed assessments cannot be deleted."
+        : `Assessment has ${result.scoreCount} score record(s) and cannot be deleted.`;
+      return Response.json(
+        {
+          message,
+          status: result.assessmentStatus,
+          scoreCount: result.scoreCount,
+        },
+        { status: 409 },
+      );
+    }
+
+    return Response.json({ success: true }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    if (error instanceof Prisma.PrismaClientKnownRequestError) {
+      if (error.code === "P2025") {
+        return Response.json({ message: "Assessment not found." }, { status: 404 });
+      }
+      if (error.code === "P2003" || error.code === "P2034") {
+        return Response.json(
+          { message: "Assessment has changed or gained dependent score records and cannot be deleted." },
+          { status: 409 },
+        );
+      }
+    }
+    console.error("DELETE /api/assessments/[id] error:", error);
+    return Response.json(
+      { message: "Internal server error." },
+      { status: 500 },
+    );
+  }
 }

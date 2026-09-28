@@ -2,8 +2,9 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Calendar, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X, AlertCircle } from "lucide-react";
+import { Calendar, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X, AlertCircle, Trash2 } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 interface ProgramItem {
   id: string;
@@ -19,6 +20,11 @@ interface BatchData {
   endDate: string | null;
   createdAt: string;
   updatedAt: string;
+  _count: {
+    enrollments: number;
+    classes: number;
+    certificates: number;
+  };
   program?: {
     id: string;
     code: string;
@@ -42,9 +48,10 @@ const emptyForm: FormValues = {
 
 interface BatchesPageProps {
   userRole?: string;
+  canDelete?: boolean;
 }
 
-export function BatchesPage({ userRole }: BatchesPageProps) {
+export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
   const canMutate =
     userRole === "SUPER_ADMIN" ||
     userRole === "ADMIN" ||
@@ -65,6 +72,9 @@ export function BatchesPage({ userRole }: BatchesPageProps) {
   const [submitLoading, setSubmitLoading] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [deleteCandidate, setDeleteCandidate] = useState<BatchData | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -107,6 +117,26 @@ export function BatchesPage({ userRole }: BatchesPageProps) {
   const reloadBatches = () => {
     setLoading(true);
     setRefreshTrigger((prev) => prev + 1);
+  };
+
+  const deleteBatch = async () => {
+    if (!deleteCandidate) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/batches/${deleteCandidate.id}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.error || `Gagal menghapus batch (HTTP ${response.status})`);
+      }
+      setNotice(`Batch "${deleteCandidate.name}" berhasil dihapus.`);
+      setDeleteCandidate(null);
+      reloadBatches();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : "Gagal menghapus batch.");
+    } finally {
+      setDeletePending(false);
+    }
   };
 
   const filtered = useMemo(() => {
@@ -401,6 +431,35 @@ export function BatchesPage({ userRole }: BatchesPageProps) {
                               <Edit3 className="size-4" />
                             </button>
                           )}
+                          {canDelete && (() => {
+                            const dependencies = batch._count;
+                            const blocked =
+                              dependencies.enrollments > 0 ||
+                              dependencies.classes > 0 ||
+                              dependencies.certificates > 0;
+                            const reason = [
+                              dependencies.enrollments > 0 && `${dependencies.enrollments} Enrollment`,
+                              dependencies.classes > 0 && `${dependencies.classes} Class`,
+                              dependencies.certificates > 0 && `${dependencies.certificates} Certificate`,
+                            ].filter(Boolean).join(", ");
+                            return (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setDeleteError(null);
+                                  setDeleteCandidate(batch);
+                                }}
+                                disabled={blocked}
+                                title={blocked ? `Tidak dapat dihapus: masih memiliki ${reason}.` : "Hapus batch"}
+                                aria-label={blocked
+                                  ? `Tidak dapat menghapus ${batch.name}: masih memiliki ${reason}`
+                                  : `Hapus ${batch.name}`}
+                                className="rounded-md p-2 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                              >
+                                <Trash2 className="size-4" />
+                              </button>
+                            );
+                          })()}
                         </div>
                       </td>
                     </tr>
@@ -442,6 +501,23 @@ export function BatchesPage({ userRole }: BatchesPageProps) {
               <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
                 {submitError}
               </div>
+            )}
+            {deleteCandidate && (
+              <DeleteConfirmationDialog
+                title="Hapus batch ini?"
+                recordName={deleteCandidate.name}
+                description="Penghapusan bersifat permanen dan hanya dapat dilakukan jika batch tidak memiliki Enrollment, Class, Schedule, atau Certificate. Data terkait tidak akan dihapus."
+                confirmLabel="Hapus Batch"
+                pending={deletePending}
+                error={deleteError}
+                onCancel={() => {
+                  if (!deletePending) {
+                    setDeleteCandidate(null);
+                    setDeleteError(null);
+                  }
+                }}
+                onConfirm={deleteBatch}
+              />
             )}
 
             <div className="mt-4 space-y-4">

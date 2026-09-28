@@ -1,13 +1,20 @@
-// scripts/test-step74d-certificates-reports-e2e.mjs
+﻿// scripts/test-step74d-certificates-reports-e2e.mjs
 // Step 74D: Certificates & Reports Final E2E Audit & Hardening Test Suite
 
 import { PrismaClient } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import fs from "fs";
 import path from "path";
+import { assertSafeMutationTarget } from "./lib/test-safety.mjs";
 
 const prisma = new PrismaClient();
 const baseUrl = process.env.TEST_BASE_URL || "http://localhost:3000";
+assertSafeMutationTarget({
+  mutationFlag: "TEST_STEP74D_CERTIFICATES_REPORTS_E2E_ALLOW_MUTATIONS",
+  expectedDatabase: "ghs_integrated_test",
+  baseUrl,
+  confirmationFlag: "TEST_STEP74D_CERTIFICATES_REPORTS_E2E_CONFIRM_DATABASE",
+});
 
 const results = [];
 
@@ -726,7 +733,7 @@ async function main() {
     console.log("Final baseline counts:", finalCounts);
 
     record("138. Certificates baseline restored to 0", 0, finalCounts.certificates, "BASELINE");
-    record("139. Users baseline restored to 2", 2, finalCounts.users, "BASELINE");
+    record("139. Users baseline restored to 3", 3, finalCounts.users, "BASELINE" /* Updated STEP 88 */);
     record("140. Instructors baseline restored to 6", 6, finalCounts.instructors, "BASELINE");
     record("141. Programs baseline restored to 1", 1, finalCounts.programs, "BASELINE");
     record("142. Batches baseline restored to 2", 2, finalCounts.batches, "BASELINE");

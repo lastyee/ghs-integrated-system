@@ -1,9 +1,10 @@
 "use client";
 
 import Link from "next/link";
-import { Eye, FileText, Plus, RotateCcw, Search, X, Loader2, AlertCircle } from "lucide-react";
+import { Eye, FileText, Plus, RotateCcw, Search, X, Loader2, AlertCircle, Trash2 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 
 export type DocumentStatus = "PENDING" | "VERIFIED" | "REJECTED" | "EXPIRED";
 
@@ -69,7 +70,7 @@ function formatDate(dateString: string | null | undefined): string {
   }
 }
 
-export function DocumentsPage() {
+export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [students, setStudents] = useState<StudentSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -93,6 +94,9 @@ export function DocumentsPage() {
   });
   const [formErrors, setFormErrors] = useState<Partial<Record<string, string>>>({});
   const [notice, setNotice] = useState("");
+  const [deleteCandidate, setDeleteCandidate] = useState<DocumentRecord | null>(null);
+  const [deletePending, setDeletePending] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -236,6 +240,27 @@ export function DocumentsPage() {
       });
     } finally {
       setUploadLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!deleteCandidate) return;
+    setDeletePending(true);
+    setDeleteError(null);
+    try {
+      const response = await fetch(`/api/documents/${deleteCandidate.id}`, { method: "DELETE" });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) {
+        throw new Error(payload.message || `Gagal menghapus dokumen (HTTP ${response.status})`);
+      }
+      setNotice(`Dokumen "${deleteCandidate.fileName}" berhasil dihapus.`);
+      setDocuments((current) => current.filter((document) => document.id !== deleteCandidate.id));
+      setDeleteCandidate(null);
+      setRefreshTrigger((value) => value + 1);
+    } catch (cause) {
+      setDeleteError(cause instanceof Error ? cause.message : "Gagal menghapus dokumen.");
+    } finally {
+      setDeletePending(false);
     }
   };
 
@@ -496,6 +521,23 @@ export function DocumentsPage() {
                         >
                           <Eye className="size-4" />
                         </Link>
+                        {canDelete && (
+                          <button
+                            type="button"
+                            disabled={item.status === "VERIFIED"}
+                            onClick={() => {
+                              setDeleteCandidate(item);
+                              setDeleteError(null);
+                            }}
+                            title={item.status === "VERIFIED" ? "Dokumen terverifikasi tidak dapat dihapus." : "Hapus dokumen"}
+                            aria-label={item.status === "VERIFIED"
+                              ? `Dokumen ${item.fileName} terverifikasi tidak dapat dihapus`
+                              : `Hapus dokumen ${item.fileName}`}
+                            className="inline-flex items-center rounded-md p-2 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          >
+                            <Trash2 className="size-4" />
+                          </button>
+                        )}
                       </td>
                     </tr>
                   ))}
@@ -530,6 +572,24 @@ export function DocumentsPage() {
                     <Eye className="size-3.5" />
                     Lihat Dokumen
                   </Link>
+                  {canDelete && (
+                    <button
+                      type="button"
+                      disabled={item.status === "VERIFIED"}
+                      onClick={() => {
+                        setDeleteCandidate(item);
+                        setDeleteError(null);
+                      }}
+                      title={item.status === "VERIFIED" ? "Dokumen terverifikasi tidak dapat dihapus." : "Hapus dokumen"}
+                      aria-label={item.status === "VERIFIED"
+                        ? `Dokumen ${item.fileName} terverifikasi tidak dapat dihapus`
+                        : `Hapus dokumen ${item.fileName}`}
+                      className="mt-3 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                    >
+                      <Trash2 className="size-3.5" />
+                      Hapus
+                    </button>
+                  )}
                 </article>
               ))}
             </div>
@@ -589,6 +649,23 @@ export function DocumentsPage() {
                     ))}
                   </select>
                 </label>
+              )}
+              {deleteCandidate && (
+                <DeleteConfirmationDialog
+                  title="Hapus dokumen?"
+                  recordName={deleteCandidate.fileName}
+                  description="File dan object storage akan dihapus permanen. Tindakan ini tidak dapat dibatalkan. Hanya dokumen PENDING, REJECTED, atau EXPIRED yang dapat dihapus."
+                  confirmLabel="Hapus Permanen"
+                  pending={deletePending}
+                  error={deleteError}
+                  onCancel={() => {
+                    if (!deletePending) {
+                      setDeleteCandidate(null);
+                      setDeleteError(null);
+                    }
+                  }}
+                  onConfirm={handleDelete}
+                />
               )}
 
               <label className="block">

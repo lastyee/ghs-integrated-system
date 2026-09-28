@@ -14,7 +14,7 @@ export default async function ProgramDetailRoute({ params }: { params: Promise<{
       activeLabel="Program"
       sidebarVariant={isStudent ? "student" : "staff"}
     >
-      <ProgramDetail programId={id} />
+      <ProgramDetail programId={id} userRole={user.role} />
     </AppShell>
   );
 }

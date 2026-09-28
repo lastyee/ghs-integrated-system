@@ -94,6 +94,26 @@ export async function requirePermission(permissionName: string): Promise<Authent
   };
 }
 
+export async function userHasPermission(userId: string, permissionName: string): Promise<boolean> {
+  const user = await prisma.user.findUnique({
+    where: { id: userId },
+    select: {
+      role: {
+        select: {
+          permissions: {
+            where: {
+              permission: { name: permissionName },
+            },
+            select: { permissionId: true },
+          },
+        },
+      },
+    },
+  });
+
+  return Boolean(user?.role.permissions.length);
+}
+
 export function authorizationErrorResponse(error: unknown): Response {
   if (error instanceof AuthorizationError) {
     return Response.json({ error: error.message }, { status: error.status });
