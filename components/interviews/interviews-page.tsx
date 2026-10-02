@@ -19,6 +19,7 @@ import {
   RotateCcw,
 } from "lucide-react";
 import { InterviewFormModal } from "./interview-form";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 export type InterviewListItem = {
   id: string;
@@ -99,6 +100,7 @@ export function InterviewStatusBadge({ status }: { status: string }) {
 }
 
 export function InterviewsPage({ userRole }: InterviewsPageProps) {
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [interviews, setInterviews] = useState<InterviewListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -445,6 +447,18 @@ export function InterviewsPage({ userRole }: InterviewsPageProps) {
                     <span>Detail Wawancara</span>
                     <ExternalLink className="size-3" />
                   </Link>
+                  {canDelete && (
+                    <SoftDeleteAction
+                      endpoint={`/api/interviews/${iv.id}`}
+                      recordName="Wawancara"
+                      identifier={`${iv.application?.student?.name || "Peserta"} / ${dateStr}`}
+                      description="Wawancara akan disembunyikan dari data aktif. Riwayat lamaran tetap tersimpan."
+                      onDeleted={() => {
+                        setLoading(true);
+                        setRefreshTrigger((prev) => prev + 1);
+                      }}
+                    />
+                  )}
                 </div>
               </div>
             );

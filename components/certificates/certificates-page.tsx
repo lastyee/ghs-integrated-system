@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { CertificateForm } from "@/components/certificates/certificate-form";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 export type CertificateStatus = "ACTIVE" | "REVOKED";
 
@@ -46,7 +47,7 @@ export type CertificateRecord = {
   };
 };
 
-export function CertificatesPage() {
+export function CertificatesPage({ canDelete }: { canDelete: boolean }) {
   const [certificates, setCertificates] = useState<CertificateRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -434,6 +435,15 @@ export function CertificatesPage() {
                               Unduh
                             </button>
                           )}
+                          {canDelete && (
+                            <SoftDeleteAction
+                              endpoint={`/api/certificates/${cert.id}`}
+                              recordName="Sertifikat"
+                              identifier={cert.certificateNumber}
+                              description="Status ACTIVE/REVOKED dan relasi riwayat tetap tersimpan. File storage tidak dihapus."
+                              onDeleted={() => setRefreshTrigger((previous) => previous + 1)}
+                            />
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -517,6 +527,15 @@ export function CertificatesPage() {
                         )}
                         Unduh
                       </button>
+                    )}
+                    {canDelete && (
+                      <SoftDeleteAction
+                        endpoint={`/api/certificates/${cert.id}`}
+                        recordName="Sertifikat"
+                        identifier={cert.certificateNumber}
+                        description="Status ACTIVE/REVOKED dan relasi riwayat tetap tersimpan. File storage tidak dihapus."
+                        onDeleted={() => setRefreshTrigger((previous) => previous + 1)}
+                      />
                     )}
                   </div>
                 </div>

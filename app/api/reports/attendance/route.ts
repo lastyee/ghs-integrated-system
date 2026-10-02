@@ -22,23 +22,45 @@ export async function GET() {
       prisma.attendance.groupBy({
         by: ["status"],
         _count: { status: true },
+        where: {
+          deletedAt: null,
+          student: { deletedAt: null },
+          schedule: {
+            deletedAt: null,
+            class: { deletedAt: null, batch: { deletedAt: null, program: { deletedAt: null } } },
+            subject: { deletedAt: null },
+            instructor: { deletedAt: null },
+          },
+        },
       }),
       prisma.attendance.groupBy({
         by: ["absenceType"],
         _count: { absenceType: true },
         where: {
+          deletedAt: null,
+          student: { deletedAt: null },
+          schedule: {
+            deletedAt: null,
+            class: { deletedAt: null, batch: { deletedAt: null, program: { deletedAt: null } } },
+            subject: { deletedAt: null },
+            instructor: { deletedAt: null },
+          },
           absenceType: { not: null },
         },
       }),
       prisma.batch.findMany({
+        where: { deletedAt: null, program: { deletedAt: null } },
         select: {
           id: true,
           name: true,
           classes: {
+            where: { deletedAt: null, instructor: { deletedAt: null } },
             select: {
               schedules: {
+                where: { deletedAt: null, subject: { deletedAt: null }, instructor: { deletedAt: null } },
                 select: {
                   attendances: {
+                    where: { deletedAt: null, student: { deletedAt: null } },
                     select: {
                       status: true,
                     },

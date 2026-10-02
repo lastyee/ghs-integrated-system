@@ -16,6 +16,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import type { ApiAttendanceItem, ApiScheduleSummary } from "@/components/attendance/attendance-page";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 interface StudentItem {
   id: string;
@@ -61,7 +62,13 @@ function formatUtcTime(timeStr: string): string {
   return timeStr.substring(0, 5);
 }
 
-export function AttendanceSessionDetail({ scheduleId }: { scheduleId: string }) {
+export function AttendanceSessionDetail({
+  scheduleId,
+  canDelete = false,
+}: {
+  scheduleId: string;
+  canDelete?: boolean;
+}) {
   const [schedule, setSchedule] = useState<ApiScheduleSummary | null>(null);
   const [attendances, setAttendances] = useState<ApiAttendanceItem[]>([]);
   const [students, setStudents] = useState<StudentItem[]>([]);
@@ -527,6 +534,7 @@ export function AttendanceSessionDetail({ scheduleId }: { scheduleId: string }) 
                 <th className="px-5 py-3 font-semibold">Nama Mahasiswa</th>
                 <th className="px-5 py-3 font-semibold">Status Saat Ini</th>
                 <th className="px-5 py-3 font-semibold">Tandai Kehadiran</th>
+                {canDelete && <th className="px-5 py-3 font-semibold">Aksi</th>}
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-100">
@@ -583,6 +591,19 @@ export function AttendanceSessionDetail({ scheduleId }: { scheduleId: string }) 
                         {isSaving && <Loader2 className="size-4 animate-spin text-[#102f50]" />}
                       </div>
                     </td>
+                    {canDelete && (
+                      <td className="px-5 py-4">
+                        {att && (
+                          <SoftDeleteAction
+                            endpoint={`/api/attendances/${att.id}`}
+                            recordName="Kehadiran"
+                            identifier={`${student.name} / ${student.nim}`}
+                            description="Data kehadiran akan disembunyikan dari data aktif. Riwayat sesi dan peserta tetap tersimpan."
+                            onDeleted={() => setAttendances((previous) => previous.filter((item) => item.id !== att.id))}
+                          />
+                        )}
+                      </td>
+                    )}
                   </tr>
                 );
               })}

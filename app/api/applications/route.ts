@@ -87,6 +87,7 @@ export const applicationDetailSelect = {
     },
   },
   interviews: {
+    where: { deletedAt: null },
     select: {
       id: true,
       scheduledAt: true,
@@ -145,11 +146,15 @@ export async function GET(request: Request) {
 
     const { studentId: queryStudentId, vacancyId, status } = parsedQuery.data;
 
-    const where: Prisma.ApplicationWhereInput = {};
+    const where: Prisma.ApplicationWhereInput = {
+      deletedAt: null,
+      student: { deletedAt: null },
+      vacancy: { deletedAt: null, employer: { deletedAt: null } },
+    };
 
     if (authenticatedUser.role === "STUDENT") {
       const student = await prisma.student.findFirst({
-        where: { userId: authenticatedUser.id },
+        where: { userId: authenticatedUser.id, deletedAt: null },
         select: { id: true },
       });
 
@@ -227,7 +232,7 @@ export async function POST(request: Request) {
 
     // Validate that Vacancy exists and is OPEN
     const vacancy = await prisma.vacancy.findUnique({
-      where: { id: data.vacancyId },
+      where: { id: data.vacancyId, deletedAt: null, employer: { is: { deletedAt: null } } },
       select: { id: true, status: true, title: true },
     });
 
@@ -272,7 +277,7 @@ export async function POST(request: Request) {
       }
 
       const targetStudent = await prisma.student.findUnique({
-        where: { id: data.studentId },
+        where: { id: data.studentId, deletedAt: null },
         select: { id: true },
       });
 
@@ -362,7 +367,7 @@ export async function POST(request: Request) {
 
 export async function DELETE() {
   return Response.json(
-    { message: "Method Not Allowed. Application deletion is not permitted." },
+    { message: "Method Not Allowed. Delete applications by ID." },
     { status: 405, headers: { Allow: "GET, POST" } }
   );
 }

@@ -12,6 +12,7 @@ export async function GET() {
     await requirePermission("class:read");
 
     const instructors = await prisma.instructor.findMany({
+      where: { deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -20,8 +21,19 @@ export async function GET() {
         updatedAt: true,
         _count: {
           select: {
-            classes: true,
-            schedules: true,
+            classes: {
+              where: {
+                deletedAt: null,
+                batch: { deletedAt: null, program: { deletedAt: null } },
+              },
+            },
+            schedules: {
+              where: {
+                deletedAt: null,
+                class: { deletedAt: null, batch: { deletedAt: null, program: { deletedAt: null } } },
+                subject: { deletedAt: null },
+              },
+            },
           },
         },
       },

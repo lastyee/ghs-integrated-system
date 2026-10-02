@@ -12,6 +12,7 @@ import {
   AlertCircle,
   RefreshCw,
 } from "lucide-react";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 type UserItem = {
   id: string;
@@ -36,7 +37,7 @@ type UserStats = {
   unactivatedStudents: number;
 };
 
-export function UserManagementPage() {
+export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
   const [users, setUsers] = useState<UserItem[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -45,6 +46,7 @@ export function UserManagementPage() {
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("ALL");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
@@ -61,6 +63,7 @@ export function UserManagementPage() {
         if (isMounted) {
           setUsers(data.users || []);
           setStats(data.stats || null);
+          setCurrentUserId(data.currentUserId || null);
         }
       })
       .catch((err: unknown) => {
@@ -222,6 +225,7 @@ export function UserManagementPage() {
                   <th className="px-5 py-3 font-semibold">Mahasiswa Terkait</th>
                   <th className="px-5 py-3 font-semibold">Status Akun</th>
                   <th className="px-5 py-3 font-semibold">Terdaftar Sejak</th>
+                  <th className="px-5 py-3 font-semibold text-right">Aksi</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-[#EEEEEE]">
@@ -290,6 +294,27 @@ export function UserManagementPage() {
                             year: "numeric",
                           })}
                         </span>
+                      </td>
+
+                      <td className="px-5 py-3 text-right">
+                        {u.id === currentUserId ? (
+                          <span className="text-[11px] text-slate-400">
+                            Akun yang sedang digunakan
+                          </span>
+                        ) : (
+                          canDelete ? (
+                            <SoftDeleteAction
+                              endpoint={`/api/users/${u.id}`}
+                              recordName="Pengguna"
+                              identifier={`${u.name || u.email} / ${u.email}`}
+                              description="Akun akan dinonaktifkan. Relasi Student/Instructor dan seluruh riwayat tetap tersimpan."
+                              onDeleted={() => {
+                                setLoading(true);
+                                setRefreshTrigger((trigger) => trigger + 1);
+                              }}
+                            />
+                          ) : null
+                        )}
                       </td>
                     </tr>
                   );

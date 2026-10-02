@@ -147,11 +147,11 @@ export async function GET(request: Request) {
       status,
     } = parsedQuery.data;
 
-    const where: Prisma.InterviewWhereInput = {};
+    const where: Prisma.InterviewWhereInput = { deletedAt: null };
 
     if (authenticatedUser.role === "STUDENT") {
       const student = await prisma.student.findFirst({
-        where: { userId: authenticatedUser.id },
+        where: { userId: authenticatedUser.id, deletedAt: null },
         select: { id: true },
       });
 
@@ -192,7 +192,18 @@ export async function GET(request: Request) {
     }
 
     const interviews = await prisma.interview.findMany({
-      where,
+      where: {
+        AND: [
+          where,
+          {
+            application: {
+              deletedAt: null,
+              student: { deletedAt: null },
+              vacancy: { deletedAt: null, employer: { deletedAt: null } },
+            },
+          },
+        ],
+      },
       select: interviewListSelect,
       orderBy: { scheduledAt: "desc" },
     });
@@ -243,7 +254,12 @@ export async function POST(request: Request) {
 
     // Verify application existence
     const application = await prisma.application.findUnique({
-      where: { id: data.applicationId },
+      where: {
+        id: data.applicationId,
+        deletedAt: null,
+        student: { deletedAt: null },
+        vacancy: { deletedAt: null, employer: { deletedAt: null } },
+      },
       select: {
         id: true,
         status: true,

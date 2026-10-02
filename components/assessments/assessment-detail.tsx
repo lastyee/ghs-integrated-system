@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import { AlertCircle, ArrowLeft, CheckCircle2, Save, Trash2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 export interface ApiScoreItem {
   id: string;
@@ -60,9 +61,11 @@ interface StudentRowData {
 export function AssessmentDetail({
   assessmentId,
   canDelete = false,
+  canDeleteScores = false,
 }: {
   assessmentId: string;
   canDelete?: boolean;
+  canDeleteScores?: boolean;
 }) {
   const router = useRouter();
   const [assessment, setAssessment] = useState<ApiAssessmentDetail | null>(null);
@@ -324,12 +327,6 @@ export function AssessmentDetail({
           assessment.scores.reduce((acc, s) => acc + (s.score ?? 0), 0) / scoredCount
         ).toFixed(1)
       : "-";
-  const deleteBlockedReason = assessment.status === "COMPLETED"
-    ? "Assessment COMPLETED tidak dapat dihapus."
-    : assessment.scores.length > 0
-      ? `Assessment memiliki ${assessment.scores.length} nilai.`
-      : null;
-
   const deleteAssessment = async () => {
     setDeletePending(true);
     setDeleteError(null);
@@ -372,20 +369,15 @@ export function AssessmentDetail({
           <div className="flex flex-col items-start gap-1 sm:items-end">
             <button
               type="button"
-              disabled={Boolean(deleteBlockedReason)}
               onClick={() => {
                 setDeleteError(null);
                 setDeleteOpen(true);
               }}
-              title={deleteBlockedReason ?? undefined}
-              className="inline-flex items-center gap-2 rounded-lg bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+              className="inline-flex items-center gap-2 rounded-lg bg-red-700 px-4 py-2.5 text-sm font-semibold text-white hover:bg-red-800"
             >
               <Trash2 className="size-4" />
               Hapus Assessment
             </button>
-            {deleteBlockedReason && (
-              <p className="text-xs text-slate-500">{deleteBlockedReason}</p>
-            )}
           </div>
         )}
       </div>
@@ -567,15 +559,26 @@ export function AssessmentDetail({
                         </span>
                       </td>
                       <td className="px-5 py-4">
-                        <button
-                          type="button"
-                          disabled={isSaving}
-                          onClick={() => handleSaveScore(row.studentId, row.scoreId)}
-                          className="inline-flex items-center gap-1.5 rounded-lg bg-[#102f50] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0c233c] disabled:opacity-50"
-                        >
-                          <Save className="size-3.5" />
-                          {isSaving ? "Menyimpan..." : row.scoreId ? "Update" : "Simpan"}
-                        </button>
+                        <div className="flex items-center gap-2">
+                          <button
+                            type="button"
+                            disabled={isSaving}
+                            onClick={() => handleSaveScore(row.studentId, row.scoreId)}
+                            className="inline-flex items-center gap-1.5 rounded-lg bg-[#102f50] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0c233c] disabled:opacity-50"
+                          >
+                            <Save className="size-3.5" />
+                            {isSaving ? "Menyimpan..." : row.scoreId ? "Update" : "Simpan"}
+                          </button>
+                          {canDeleteScores && row.scoreId && (
+                            <SoftDeleteAction
+                              endpoint={`/api/assessments/${assessmentId}/scores/${row.scoreId}`}
+                              recordName="Nilai"
+                              identifier={`${row.studentName} / ${row.nim}`}
+                              description="Nilai akan disembunyikan dari data aktif. Riwayat penilaian tetap tersimpan."
+                              onDeleted={fetchAssessment}
+                            />
+                          )}
+                        </div>
                       </td>
                     </tr>
                   );
@@ -587,10 +590,8 @@ export function AssessmentDetail({
       </section>
       {deleteOpen && (
         <DeleteConfirmationDialog
-          title="Hapus assessment ini?"
           recordName={assessment.name}
-          description="Assessment ini masih berstatus OPEN dan belum memiliki nilai. Data assessment akan dihapus permanen."
-          confirmLabel="Hapus Permanen"
+          description="Assessment dan seluruh nilai historisnya akan tetap tersimpan."
           pending={deletePending}
           error={deleteError}
           onCancel={() => {

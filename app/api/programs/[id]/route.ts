@@ -26,11 +26,12 @@ export async function GET(
     await requirePermission("program:read");
     const { id } = await params;
 
-    const program = await prisma.program.findUnique({
-      where: { id },
+    const program = await prisma.program.findFirst({
+      where: { id, deletedAt: null },
       select: {
         ...programSelect,
         batches: {
+          where: { deletedAt: null },
           select: {
             id: true,
             name: true,
@@ -89,8 +90,8 @@ export async function PATCH(
     }
 
     const program = await prisma.$transaction(async (transaction) => {
-      const previousProgram = await transaction.program.findUnique({
-        where: { id },
+      const previousProgram = await transaction.program.findFirst({
+        where: { id, deletedAt: null },
         select: {
           id: true,
           code: true,
@@ -180,67 +181,35 @@ export async function DELETE(
     const { id } = await params;
 
     const result = await prisma.$transaction(async (transaction) => {
-      const program = await transaction.program.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          _count: {
-            select: {
-              batches: true,
-              certificates: true,
-              subjects: true,
-            },
-          },
-        },
+      const program = await transaction.program.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
       });
 
       if (!program) return { kind: "not-found" as const };
 
-      const dependencies = {
-        batches: program._count.batches,
-        certificates: program._count.certificates,
-        programSubjects: program._count.subjects,
-      };
-      if (
-        dependencies.batches > 0 ||
-        dependencies.certificates > 0 ||
-        dependencies.programSubjects > 0
-      ) {
-        return { kind: "blocked" as const, program, dependencies };
-      }
-
-      await transaction.program.delete({ where: { id } });
+      const deletedAt = new Date();
+      await transaction.program.update({
+        where: { id: program.id },
+        data: { deletedAt },
+      });
       await createAuditLog(transaction, authenticatedUser, {
         action: "DELETE",
         entity: "Program",
         entityId: program.id,
-        changes: { deleted: { code: program.code, name: program.name }, dependencies },
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
       });
 
-      return { kind: "deleted" as const, id: program.id, code: program.code, name: program.name };
+      return { kind: "deleted" as const, id: program.id, deletedAt };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     if (result.kind === "not-found") {
       return Response.json({ error: "Program not found" }, { status: 404 });
     }
-    if (result.kind === "blocked") {
-      const reasons = [
-        result.dependencies.batches > 0 && `${result.dependencies.batches} Batch`,
-        result.dependencies.certificates > 0 && `${result.dependencies.certificates} Certificate`,
-        result.dependencies.programSubjects > 0 && `${result.dependencies.programSubjects} Subject link`,
-      ].filter(Boolean);
-      return Response.json(
-        {
-          error: `Program "${result.program.name}" tidak dapat dihapus karena masih memiliki ${reasons.join(", ")}.`,
-          dependencies: result.dependencies,
-        },
-        { status: 409 },
-      );
-    }
 
-    return Response.json({ data: result }, { status: 200 });
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

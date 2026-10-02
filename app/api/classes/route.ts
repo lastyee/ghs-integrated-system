@@ -5,6 +5,7 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import { requireLinkedInstructor } from "@/lib/instructor-ownership";
 import { classCreateSchema } from "@/schemas/class";
 
 const prisma = new PrismaClient();
@@ -36,9 +37,23 @@ const classSelect = {
 
 export async function GET() {
   try {
-    await requirePermission("class:read");
+    const authenticatedUser = await requirePermission("class:read");
+    const where =
+      authenticatedUser.role === "INSTRUCTOR"
+        ? {
+            deletedAt: null,
+            instructorId: (await requireLinkedInstructor(authenticatedUser)).id,
+            batch: { deletedAt: null, program: { deletedAt: null } },
+            instructor: { deletedAt: null },
+          }
+        : {
+            deletedAt: null,
+            batch: { deletedAt: null, program: { deletedAt: null } },
+            instructor: { deletedAt: null },
+          };
 
     const classes = await prisma.class.findMany({
+      where,
       select: classSelect,
       orderBy: [{ name: "asc" }, { id: "asc" }],
     });
@@ -72,7 +87,7 @@ export async function POST(request: Request) {
     }
 
     const batch = await prisma.batch.findUnique({
-      where: { id: parsed.data.batchId },
+      where: { id: parsed.data.batchId, deletedAt: null, program: { deletedAt: null } },
       select: { id: true },
     });
 
@@ -81,7 +96,7 @@ export async function POST(request: Request) {
     }
 
     const instructor = await prisma.instructor.findUnique({
-      where: { id: parsed.data.instructorId },
+      where: { id: parsed.data.instructorId, deletedAt: null },
       select: { id: true },
     });
 

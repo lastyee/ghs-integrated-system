@@ -21,7 +21,7 @@ export const employerSelect = {
   updatedAt: true,
   _count: {
     select: {
-      vacancies: true,
+      vacancies: { where: { deletedAt: null } },
     },
   },
 } as const;
@@ -33,7 +33,7 @@ export async function GET(request: Request) {
 
     const search = searchParams.get("search") || searchParams.get("name");
 
-    const where: Prisma.EmployerWhereInput = {};
+    const where: Prisma.EmployerWhereInput = { deletedAt: null };
 
     if (search && search.trim()) {
       where.name = {
@@ -93,6 +93,7 @@ export async function POST(request: Request) {
     // Application-level duplicate guard on employer name
     const existing = await prisma.employer.findFirst({
       where: {
+        deletedAt: null,
         name: {
           equals: data.name,
           mode: "insensitive",

@@ -17,12 +17,16 @@ import {
   X,
 } from "lucide-react";
 import type { CertificateRecord } from "@/components/certificates/certificates-page";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
+import { useRouter } from "next/navigation";
 
 type CertificateDetailProps = {
   certificateId: string;
+  canDelete: boolean;
 };
 
-export function CertificateDetail({ certificateId }: CertificateDetailProps) {
+export function CertificateDetail({ certificateId, canDelete }: CertificateDetailProps) {
+  const router = useRouter();
   const [certificate, setCertificate] = useState<CertificateRecord | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -295,6 +299,15 @@ export function CertificateDetail({ certificateId }: CertificateDetailProps) {
               <AlertTriangle className="size-4" />
               Cabut Sertifikat
             </button>
+          )}
+          {canDelete && (
+            <SoftDeleteAction
+              endpoint={`/api/certificates/${certificateId}`}
+              recordName="Sertifikat"
+              identifier={certificate.certificateNumber}
+              description="Status ACTIVE/REVOKED dan relasi riwayat tetap tersimpan. File storage tidak dihapus."
+              onDeleted={() => router.push("/certificates")}
+            />
           )}
         </div>
       </div>

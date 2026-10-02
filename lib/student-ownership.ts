@@ -15,8 +15,8 @@ export async function requireStudentOwnership(
   studentId: string,
 ): Promise<OwnedStudent> {
   const authenticatedUser = await requireAuthenticatedUser();
-  const student = await prisma.student.findUnique({
-    where: { id: studentId },
+  const student = await prisma.student.findFirst({
+    where: { id: studentId, deletedAt: null },
     select: {
       id: true,
       userId: true,

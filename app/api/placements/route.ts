@@ -99,11 +99,35 @@ export async function GET(request: Request) {
       status,
     } = parsedQuery.data;
 
-    const where: Prisma.PlacementWhereInput = {};
+    const where: Prisma.PlacementWhereInput = {
+      deletedAt: null,
+      student: { deletedAt: null },
+      employer: { deletedAt: null },
+      AND: [
+        {
+          OR: [
+            { vacancyId: null },
+            { vacancy: { deletedAt: null, employer: { deletedAt: null } } },
+          ],
+        },
+        {
+          OR: [
+            { applicationId: null },
+            {
+              application: {
+                deletedAt: null,
+                student: { deletedAt: null },
+                vacancy: { deletedAt: null, employer: { deletedAt: null } },
+              },
+            },
+          ],
+        },
+      ],
+    };
 
     if (authenticatedUser.role === "STUDENT") {
       const student = await prisma.student.findFirst({
-        where: { userId: authenticatedUser.id },
+        where: { userId: authenticatedUser.id, deletedAt: null },
         select: { id: true },
       });
 
@@ -180,7 +204,7 @@ export async function POST(request: Request) {
 
     // 1. Student must exist
     const student = await prisma.student.findUnique({
-      where: { id: data.studentId },
+      where: { id: data.studentId, deletedAt: null },
       select: { id: true },
     });
     if (!student) {
@@ -192,7 +216,7 @@ export async function POST(request: Request) {
 
     // 2. Employer must exist
     const employer = await prisma.employer.findUnique({
-      where: { id: data.employerId },
+      where: { id: data.employerId, deletedAt: null },
       select: { id: true },
     });
     if (!employer) {
@@ -205,7 +229,7 @@ export async function POST(request: Request) {
     // 3. Vacancy if provided must exist
     if (data.vacancyId) {
       const vacancy = await prisma.vacancy.findUnique({
-        where: { id: data.vacancyId },
+        where: { id: data.vacancyId, deletedAt: null, employer: { is: { deletedAt: null } } },
         select: { id: true },
       });
       if (!vacancy) {
@@ -219,7 +243,12 @@ export async function POST(request: Request) {
     // 4. Application if provided must exist
     if (data.applicationId) {
       const application = await prisma.application.findUnique({
-        where: { id: data.applicationId },
+        where: {
+          id: data.applicationId,
+          deletedAt: null,
+          student: { deletedAt: null },
+          vacancy: { deletedAt: null, employer: { deletedAt: null } },
+        },
         select: {
           id: true,
           studentId: true,

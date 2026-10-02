@@ -29,6 +29,7 @@ type StudentData = {
   name: string;
   phone: string | null;
   address: string | null;
+  status: "ACTIVE" | "GRADUATED" | "DROPPED";
   createdAt: string;
   updatedAt: string;
   enrollments?: StudentEnrollmentItem[];
@@ -119,7 +120,20 @@ export function StudentDetail({
         <p className="mt-5 text-xs font-medium text-slate-500">Dashboard / Peserta / {student.nim}</p>
         <div className="mt-2 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
           <div>
-            <h1 className="text-2xl font-bold tracking-tight text-[#102f50]">{student.name}</h1>
+            <div className="flex flex-wrap items-center gap-3">
+              <h1 className="text-2xl font-bold tracking-tight text-[#102f50]">{student.name}</h1>
+              <span
+                className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                  student.status === "ACTIVE"
+                    ? "bg-emerald-50 text-emerald-700"
+                    : student.status === "GRADUATED"
+                    ? "bg-blue-50 text-blue-700"
+                    : "bg-red-50 text-red-700"
+                }`}
+              >
+                {student.status === "ACTIVE" ? "Aktif" : student.status === "GRADUATED" ? "Lulus" : "Tidak Lanjut"}
+              </span>
+            </div>
             <p className="mt-1 text-sm text-slate-500">NIM: {student.nim}</p>
           </div>
         </div>

@@ -10,15 +10,18 @@ import {
   Lock,
   MapPin,
   MoreHorizontal,
+  Plus,
   RotateCcw,
   Search,
   Shirt,
   Tag,
   User,
   Users,
+  X,
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 export interface ApiSchedule {
   id: string;
@@ -53,6 +56,21 @@ export interface ApiSchedule {
   };
 }
 
+export interface ApiClass {
+  id: string;
+  name: string;
+}
+
+export interface ApiSubject {
+  id: string;
+  name: string;
+}
+
+export interface ApiInstructor {
+  id: string;
+  name: string;
+}
+
 function getUtcDayName(dateStr: string): string {
   try {
     const [year, month, day] = dateStr.substring(0, 10).split("-").map(Number);
@@ -72,7 +90,8 @@ function formatUtcTime(timeStr: string): string {
   return timeStr.substring(0, 5);
 }
 
-export function SchedulesPage() {
+export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [schedules, setSchedules] = useState<ApiSchedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +107,31 @@ export function SchedulesPage() {
 
   const [reloadKey, setReloadKey] = useState(0);
 
+  const [classes, setClasses] = useState<ApiClass[]>([]);
+  const [subjects, setSubjects] = useState<ApiSubject[]>([]);
+  const [instructorsList, setInstructorsList] = useState<ApiInstructor[]>([]);
+  
+  const [modal, setModal] = useState<"create" | "edit" | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [form, setForm] = useState({
+    classId: "",
+    subjectId: "",
+    instructorId: "",
+    date: "",
+    startTime: "",
+    endTime: "",
+    room: "",
+    dressCode: "",
+    topic: "",
+    status: "SCHEDULED",
+  });
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+
+  const canMutate = userRole === "SUPER_ADMIN" || userRole === "ADMIN" || userRole === "ACADEMIC_STAFF";
+
   const handleReload = () => {
     setLoading(true);
     setReloadKey((k) => k + 1);
@@ -98,9 +142,12 @@ export function SchedulesPage() {
 
     async function loadSchedules() {
       try {
-        const res = await fetch("/api/schedules", {
-          headers: { Accept: "application/json" },
-        });
+        const [res, clsRes, subRes, insRes] = await Promise.all([
+          fetch("/api/schedules", { headers: { Accept: "application/json" } }),
+          fetch("/api/classes"),
+          fetch("/api/subjects"),
+          fetch("/api/instructors"),
+        ]);
 
         if (ignore) return;
 
@@ -118,8 +165,15 @@ export function SchedulesPage() {
         }
 
         const json = await res.json();
+        const clsJson = clsRes.ok ? await clsRes.json() : { data: [] };
+        const subJson = subRes.ok ? await subRes.json() : { data: [] };
+        const insJson = insRes.ok ? await insRes.json() : { data: [] };
+
         if (ignore) return;
         setSchedules(Array.isArray(json.data) ? json.data : []);
+        setClasses(clsJson.data || []);
+        setSubjects(subJson.data || []);
+        setInstructorsList(insJson.data || []);
       } catch (err) {
         if (ignore) return;
         setError(err instanceof Error ? err.message : "Terjadi kesalahan jaringan.");
@@ -196,6 +250,125 @@ export function SchedulesPage() {
     setInstructor("ALL");
   };
 
+  const openCreate = () => {
+    setForm({
+      classId: classes.length > 0 ? classes[0].id : "",
+      subjectId: subjects.length > 0 ? subjects[0].id : "",
+      instructorId: instructorsList.length > 0 ? instructorsList[0].id : "",
+      date: "",
+      startTime: "",
+      endTime: "",
+      room: "",
+      dressCode: "",
+      topic: "",
+      status: "SCHEDULED",
+    });
+    setFormErrors({});
+    setSubmitError(null);
+    setEditingId(null);
+    setModal("create");
+  };
+
+  const openEdit = (s: ApiSchedule) => {
+    const toLocalTime = (utcIso: string) => {
+      if (!utcIso) return "";
+      const d = new Date(utcIso);
+      return d.toTimeString().substring(0, 5);
+    };
+    
+    setForm({
+      classId: s.classId,
+      subjectId: s.subjectId,
+      instructorId: s.instructorId,
+      date: s.date.substring(0, 10),
+      startTime: toLocalTime(s.startTime),
+      endTime: toLocalTime(s.endTime),
+      room: s.room || "",
+      dressCode: s.dressCode || "",
+      topic: s.topic || "",
+      status: s.status,
+    });
+    setFormErrors({});
+    setSubmitError(null);
+    setEditingId(s.id);
+    setModal("edit");
+  };
+
+  const closeModal = () => {
+    if (submitLoading) return;
+    setModal(null);
+    setEditingId(null);
+    setSubmitError(null);
+    setFormErrors({});
+  };
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+
+    if (!form.classId) errs.classId = "Kelas wajib dipilih";
+    if (!form.subjectId) errs.subjectId = "Subject wajib dipilih";
+    if (!form.instructorId) errs.instructorId = "Instruktur wajib dipilih";
+    if (!form.date) errs.date = "Tanggal wajib diisi";
+    if (!form.startTime) errs.startTime = "Jam mulai wajib diisi";
+    if (!form.endTime) errs.endTime = "Jam selesai wajib diisi";
+
+    if (form.startTime && form.endTime && form.endTime < form.startTime) {
+      errs.endTime = "Jam selesai harus setelah jam mulai";
+    }
+
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
+      return;
+    }
+
+    try {
+      setSubmitLoading(true);
+      setSubmitError(null);
+      setFormErrors({});
+
+      const url = modal === "create" ? "/api/schedules" : `/api/schedules/${editingId}`;
+      const method = modal === "create" ? "POST" : "PATCH";
+
+      // Reconstruct to full ISO with current timezone or dummy date
+      const isoStart = new Date(`${form.date}T${form.startTime}:00`).toISOString();
+      const isoEnd = new Date(`${form.date}T${form.endTime}:00`).toISOString();
+
+      const payload = {
+        classId: form.classId,
+        subjectId: form.subjectId,
+        instructorId: form.instructorId,
+        date: new Date(form.date).toISOString(),
+        startTime: isoStart,
+        endTime: isoEnd,
+        room: form.room.trim() || null,
+        dressCode: form.dressCode.trim() || null,
+        topic: form.topic.trim() || null,
+        ...(modal === "edit" ? { status: form.status } : {}),
+      };
+
+      const res = await fetch(url, {
+        method,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      const resJson = await res.json().catch(() => ({}));
+
+      if (!res.ok) {
+        throw new Error(resJson.error || `Gagal menyimpan jadwal (Status: ${res.status})`);
+      }
+
+      setNotice(modal === "create" ? "Jadwal berhasil ditambahkan." : "Jadwal berhasil diperbarui.");
+      closeModal();
+      handleReload();
+    } catch (err: unknown) {
+      setSubmitError(err instanceof Error ? err.message : "Terjadi kesalahan saat menyimpan");
+    } finally {
+      setSubmitLoading(false);
+    }
+  };
+
   return (
     <div className="mx-auto max-w-7xl p-4 sm:p-8">
       {/* Header */}
@@ -207,7 +380,30 @@ export function SchedulesPage() {
             Jadwal sesi training resmi Global Hospitality School (Database Aktif)
           </p>
         </div>
+        {canMutate && (
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex w-fit items-center gap-2 rounded-lg bg-[#c94242] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#a83232] transition"
+          >
+            <Plus className="size-4" />
+            Tambah Jadwal
+          </button>
+        )}
       </div>
+
+      {notice && (
+        <div className="mb-6 flex items-center justify-between rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
+          <span>{notice}</span>
+          <button
+            type="button"
+            onClick={() => setNotice(null)}
+            className="text-xs font-bold text-emerald-700 underline ml-4"
+          >
+            Tutup
+          </button>
+        </div>
+      )}
 
       {/* Stat Cards */}
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Statistik jadwal">
@@ -382,6 +578,10 @@ export function SchedulesPage() {
                         item={item}
                         openMenu={openMenu}
                         setOpenMenu={setOpenMenu}
+                        canMutate={canMutate}
+                        canDelete={canDelete}
+                        onEdit={() => openEdit(item)}
+                        onDeleted={handleReload}
                       />
                     ))}
                   </div>
@@ -391,6 +591,169 @@ export function SchedulesPage() {
           </div>
         )}
       </section>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 p-4" role="dialog" aria-modal="true">
+          <form onSubmit={handleSubmit} className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h2 className="font-bold text-[#102f50]">
+                {modal === "create" ? "Tambah Jadwal" : "Edit Jadwal"}
+              </h2>
+              <button type="button" onClick={closeModal} disabled={submitLoading} className="text-slate-400 hover:text-slate-600">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {submitError && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                {submitError}
+              </div>
+            )}
+
+            <div className="mt-4 grid gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700">Kelas *</label>
+                <select
+                  value={form.classId}
+                  onChange={(e) => setForm({ ...form, classId: e.target.value })}
+                  disabled={submitLoading}
+                  className={`mt-1 h-10 w-full rounded-lg border px-3 text-sm focus:outline-none ${formErrors.classId ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                >
+                  <option value="">Pilih Kelas</option>
+                  {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+                </select>
+                {formErrors.classId && <p className="mt-1 text-xs text-red-600">{formErrors.classId}</p>}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">Mata Pelajaran *</label>
+                <select
+                  value={form.subjectId}
+                  onChange={(e) => setForm({ ...form, subjectId: e.target.value })}
+                  disabled={submitLoading}
+                  className={`mt-1 h-10 w-full rounded-lg border px-3 text-sm focus:outline-none ${formErrors.subjectId ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                >
+                  <option value="">Pilih Mata Pelajaran</option>
+                  {subjects.map(s => <option key={s.id} value={s.id}>{s.name}</option>)}
+                </select>
+                {formErrors.subjectId && <p className="mt-1 text-xs text-red-600">{formErrors.subjectId}</p>}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">Instruktur *</label>
+                <select
+                  value={form.instructorId}
+                  onChange={(e) => setForm({ ...form, instructorId: e.target.value })}
+                  disabled={submitLoading}
+                  className={`mt-1 h-10 w-full rounded-lg border px-3 text-sm focus:outline-none ${formErrors.instructorId ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                >
+                  <option value="">Pilih Instruktur</option>
+                  {instructorsList.map(i => <option key={i.id} value={i.id}>{i.name}</option>)}
+                </select>
+                {formErrors.instructorId && <p className="mt-1 text-xs text-red-600">{formErrors.instructorId}</p>}
+              </div>
+
+              <div className="sm:col-span-2 grid gap-4 grid-cols-3">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700">Tanggal *</label>
+                  <input
+                    type="date"
+                    value={form.date}
+                    onChange={(e) => setForm({ ...form, date: e.target.value })}
+                    disabled={submitLoading}
+                    className={`mt-1 h-10 w-full rounded-lg border px-3 text-sm focus:outline-none ${formErrors.date ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                  />
+                  {formErrors.date && <p className="mt-1 text-xs text-red-600">{formErrors.date}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700">Jam Mulai *</label>
+                  <input
+                    type="time"
+                    value={form.startTime}
+                    onChange={(e) => setForm({ ...form, startTime: e.target.value })}
+                    disabled={submitLoading}
+                    className={`mt-1 h-10 w-full rounded-lg border px-3 text-sm focus:outline-none ${formErrors.startTime ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                  />
+                  {formErrors.startTime && <p className="mt-1 text-xs text-red-600">{formErrors.startTime}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700">Jam Selesai *</label>
+                  <input
+                    type="time"
+                    value={form.endTime}
+                    onChange={(e) => setForm({ ...form, endTime: e.target.value })}
+                    disabled={submitLoading}
+                    className={`mt-1 h-10 w-full rounded-lg border px-3 text-sm focus:outline-none ${formErrors.endTime ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                  />
+                  {formErrors.endTime && <p className="mt-1 text-xs text-red-600">{formErrors.endTime}</p>}
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">Ruangan</label>
+                <input
+                  type="text"
+                  value={form.room}
+                  onChange={(e) => setForm({ ...form, room: e.target.value })}
+                  disabled={submitLoading}
+                  placeholder="Contoh: Room A"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#102f50] focus:outline-none"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">Seragam / Dress Code</label>
+                <input
+                  type="text"
+                  value={form.dressCode}
+                  onChange={(e) => setForm({ ...form, dressCode: e.target.value })}
+                  disabled={submitLoading}
+                  placeholder="Contoh: Formal / Batik"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#102f50] focus:outline-none"
+                />
+              </div>
+
+              <div className="sm:col-span-2">
+                <label className="block text-xs font-semibold text-slate-700">Topik / Catatan</label>
+                <input
+                  type="text"
+                  value={form.topic}
+                  onChange={(e) => setForm({ ...form, topic: e.target.value })}
+                  disabled={submitLoading}
+                  placeholder="Topik pembelajaran atau catatan khusus"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#102f50] focus:outline-none"
+                />
+              </div>
+
+              {modal === "edit" && (
+                <div className="sm:col-span-2">
+                  <label className="block text-xs font-semibold text-slate-700">Status</label>
+                  <select
+                    value={form.status}
+                    onChange={(e) => setForm({ ...form, status: e.target.value })}
+                    disabled={submitLoading}
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#102f50] focus:outline-none"
+                  >
+                    <option value="SCHEDULED">SCHEDULED</option>
+                    <option value="COMPLETED">COMPLETED</option>
+                    <option value="CANCELLED">CANCELLED</option>
+                  </select>
+                </div>
+              )}
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button type="button" onClick={closeModal} disabled={submitLoading} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">
+                Batal
+              </button>
+              <button type="submit" disabled={submitLoading} className="inline-flex items-center gap-2 rounded-lg bg-[#c94242] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#a83232] transition disabled:opacity-50">
+                {submitLoading && <Loader2 className="size-4 animate-spin" />}
+                {modal === "create" ? "Simpan Jadwal" : "Simpan Perubahan"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }
@@ -431,10 +794,18 @@ function ScheduleCard({
   item,
   openMenu,
   setOpenMenu,
+  canMutate,
+  canDelete,
+  onEdit,
+  onDeleted,
 }: {
   item: ApiSchedule;
   openMenu: string | null;
   setOpenMenu: (id: string | null) => void;
+  canMutate: boolean;
+  canDelete: boolean;
+  onEdit: () => void;
+  onDeleted: () => void;
 }) {
   const startTime = formatUtcTime(item.startTime);
   const endTime = formatUtcTime(item.endTime);
@@ -503,6 +874,27 @@ function ScheduleCard({
               >
                 Lihat Detail
               </Link>
+              {canMutate && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setOpenMenu(null);
+                    onEdit();
+                  }}
+                  className="block w-full text-left rounded-md px-3 py-2 text-slate-700 hover:bg-slate-50"
+                >
+                  Edit Jadwal
+                </button>
+              )}
+              {canDelete && (
+                <SoftDeleteAction
+                  endpoint={`/api/schedules/${item.id}`}
+                  recordName="Jadwal"
+                  identifier={`${subjectName} / ${batchName} / ${item.date}`}
+                  description="Jadwal akan disembunyikan dari data aktif. Catatan kehadiran dan riwayat pembelajaran tetap tersimpan."
+                  onDeleted={onDeleted}
+                />
+              )}
             </div>
           )}
         </div>

@@ -67,6 +67,12 @@ enum ClassStatus {
   CANCELLED
 }
 
+enum StudentStatus {
+  ACTIVE
+  GRADUATED
+  DROPPED
+}
+
 enum ScheduleStatus {
   SCHEDULED
   COMPLETED
@@ -177,6 +183,7 @@ model Program {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("programs")
 }
@@ -193,6 +200,7 @@ model Subject {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("subjects")
 }
@@ -224,6 +232,7 @@ model Batch {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("batches")
 }
@@ -240,6 +249,7 @@ model Instructor {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("instructors")
 }
@@ -258,6 +268,7 @@ model Class {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("classes")
 }
@@ -276,6 +287,7 @@ model Student {
   name    String
   phone   String?
   address String?
+  status  StudentStatus @default(ACTIVE)
 
   enrollments  Enrollment[]
   attendances  Attendance[]
@@ -304,6 +316,7 @@ model Enrollment {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("enrollments")
 }
@@ -333,6 +346,7 @@ model Schedule {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("schedules")
 }
@@ -350,6 +364,7 @@ model Attendance {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@unique([scheduleId, studentId]) // PRD: Tidak boleh ada duplicate attendance
   @@map("attendances")
@@ -375,6 +390,7 @@ model Assessment {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("assessments")
 }
@@ -390,6 +406,7 @@ model AssessmentScore {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@unique([assessmentId, studentId]) // PRD: Satu student hanya memiliki satu score untuk satu assessment
   @@map("assessment_scores")
@@ -418,6 +435,8 @@ model Document {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  deletedAt DateTime?
+
   @@index([studentId])
   @@map("documents")
 }
@@ -440,6 +459,7 @@ model Employer {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("employers")
 }
@@ -458,6 +478,7 @@ model Vacancy {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("vacancies")
 }
@@ -476,6 +497,7 @@ model Application {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@index([studentId])
   @@index([vacancyId])
@@ -495,6 +517,7 @@ model Interview {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@index([applicationId])
   @@map("interviews")
@@ -518,6 +541,7 @@ model Placement {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@index([studentId])
   @@index([employerId])
@@ -545,6 +569,7 @@ model Certificate {
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  deletedAt DateTime?
 
   @@map("certificates")
 }

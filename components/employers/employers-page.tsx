@@ -20,6 +20,7 @@ import {
 import { useEffect, useState, useMemo } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 export type EmployerRecord = {
   id: string;
@@ -55,6 +56,7 @@ const initialFormValues: EmployerFormValues = {
 };
 
 export function EmployersPage({ userRole = "" }: { userRole?: string }) {
+  const { showToast } = useToast();
   const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [employers, setEmployers] = useState<EmployerRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -136,7 +138,7 @@ export function EmployersPage({ userRole = "" }: { userRole?: string }) {
       if (!response.ok) {
         throw new Error(payload.message || payload.error || `Gagal menghapus perusahaan (HTTP ${response.status})`);
       }
-      setNotice(`Perusahaan "${deleteCandidate.name}" berhasil dihapus.`);
+      showToast("success", `Perusahaan "${deleteCandidate.name}" berhasil disembunyikan dari data aktif.`);
       setDeleteCandidate(null);
       setRefreshTrigger((previous) => previous + 1);
     } catch (err) {
@@ -511,10 +513,8 @@ export function EmployersPage({ userRole = "" }: { userRole?: string }) {
               )}
               {deleteCandidate && (
                 <DeleteConfirmationDialog
-                  title="Hapus Employer?"
                   recordName={deleteCandidate.name}
-                  description="Employer akan dihapus permanen hanya jika tidak memiliki Vacancy atau Placement. Data terkait tidak akan dihapus; server akan menolak penghapusan jika masih ada dependency."
-                  confirmLabel="Hapus Employer"
+                  description="Lowongan dan penempatan yang terkait tetap tersimpan."
                   pending={deletePending}
                   error={deleteError}
                   onCancel={() => {

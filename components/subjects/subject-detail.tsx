@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, BookOpen, Loader2, AlertCircle, Calendar, Trash2 } from "lucide-react";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 interface SubjectDetailData {
   id: string;
@@ -15,6 +16,7 @@ interface SubjectDetailData {
 }
 
 export function SubjectDetail({ subjectId, userRole = "" }: { subjectId: string; userRole?: string }) {
+  const { showToast } = useToast();
   const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [subject, setSubject] = useState<SubjectDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -70,6 +72,7 @@ export function SubjectDetail({ subjectId, userRole = "" }: { subjectId: string;
         throw new Error(payload.error || payload.message || `Gagal menghapus mata pelajaran (HTTP ${response.status})`);
       }
       setDeletedName(subject.name);
+      showToast("success", `Mata pelajaran "${subject.name}" berhasil disembunyikan dari data aktif.`);
       setSubject(null);
       setDeleteDialogOpen(false);
     } catch (err) {
@@ -158,10 +161,8 @@ export function SubjectDetail({ subjectId, userRole = "" }: { subjectId: string;
             </div>
             {canDelete && deleteDialogOpen && (
               <DeleteConfirmationDialog
-                title="Hapus Mata Pelajaran?"
                 recordName={subject.name}
-                description="Mata pelajaran akan dihapus permanen hanya jika tidak terkait ProgramSubject, Schedule, atau Assessment. Data terkait tidak akan dihapus."
-                confirmLabel="Hapus Mata Pelajaran"
+                description="Relasi program, jadwal, dan penilaian yang terkait tetap tersimpan."
                 pending={deletePending}
                 error={deleteError}
                 onCancel={() => {

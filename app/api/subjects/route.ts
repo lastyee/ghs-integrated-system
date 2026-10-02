@@ -23,6 +23,7 @@ export async function GET() {
     await requirePermission("subject:read");
 
     const subjects = await prisma.subject.findMany({
+      where: { deletedAt: null },
       select: subjectSelect,
       orderBy: [{ name: "asc" }, { id: "asc" }],
     });
@@ -101,4 +102,3 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unable to create subject" }, { status: 500 });
   }
 }
-

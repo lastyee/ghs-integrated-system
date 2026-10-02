@@ -40,18 +40,37 @@ export async function requireAuthenticatedUser(): Promise<AuthenticatedUser> {
     throw new UnauthorizedError();
   }
 
+  const activeUser = await prisma.user.findFirst({
+    where: { id: user.id, deletedAt: null },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      role: { select: { name: true } },
+      student: { select: { deletedAt: true } },
+    },
+  });
+
+  if (!activeUser) {
+    throw new UnauthorizedError("User account is no longer active");
+  }
+
+  if (activeUser.role.name === "STUDENT" && activeUser.student?.deletedAt) {
+    throw new UnauthorizedError("Student profile is no longer active");
+  }
+
   return {
-    id: user.id,
-    email: user.email,
-    name: user.name,
-    role: user.role,
+    id: activeUser.id,
+    email: activeUser.email,
+    name: activeUser.name,
+    role: activeUser.role.name,
   };
 }
 
 export async function requirePermission(permissionName: string): Promise<AuthenticatedUser> {
   const sessionUser = await requireAuthenticatedUser();
-  const user = await prisma.user.findUnique({
-    where: { id: sessionUser.id },
+  const user = await prisma.user.findFirst({
+    where: { id: sessionUser.id, deletedAt: null },
     select: {
       id: true,
       email: true,
@@ -95,8 +114,8 @@ export async function requirePermission(permissionName: string): Promise<Authent
 }
 
 export async function userHasPermission(userId: string, permissionName: string): Promise<boolean> {
-  const user = await prisma.user.findUnique({
-    where: { id: userId },
+  const user = await prisma.user.findFirst({
+    where: { id: userId, deletedAt: null },
     select: {
       role: {
         select: {

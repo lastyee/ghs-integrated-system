@@ -18,6 +18,7 @@ import {
   XCircle,
 } from "lucide-react";
 import { PlacementFormModal } from "./placement-form";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 export type PlacementListItem = {
   id: string;
@@ -116,6 +117,7 @@ export function PlacementStatusBadge({ status }: { status: string }) {
 }
 
 export function PlacementsPage({ userRole }: PlacementsPageProps) {
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [placements, setPlacements] = useState<PlacementListItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -427,6 +429,15 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
                         Detail
                         <ExternalLink className="size-3" />
                       </Link>
+                      {canDelete && (
+                        <SoftDeleteAction
+                          endpoint={`/api/placements/${item.id}`}
+                          recordName="Penempatan"
+                          identifier={`${item.student?.name} / ${item.position}`}
+                          description="Penempatan akan disembunyikan dari data aktif. Riwayat lamaran dan relasi perusahaan tetap tersimpan."
+                          onDeleted={() => setRefreshTrigger((prev) => prev + 1)}
+                        />
+                      )}
                     </td>
                   </tr>
                 ))}
@@ -486,6 +497,15 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
                     Buka Rincian Penempatan
                     <ExternalLink className="size-3.5" />
                   </Link>
+                  {canDelete && (
+                    <SoftDeleteAction
+                      endpoint={`/api/placements/${item.id}`}
+                      recordName="Penempatan"
+                      identifier={`${item.student?.name} / ${item.position}`}
+                      description="Penempatan akan disembunyikan dari data aktif. Riwayat lamaran dan relasi perusahaan tetap tersimpan."
+                      onDeleted={() => setRefreshTrigger((prev) => prev + 1)}
+                    />
+                  )}
                 </div>
               </div>
             ))}

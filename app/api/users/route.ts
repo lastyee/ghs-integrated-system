@@ -17,6 +17,7 @@ export async function GET() {
 
     const [users, totalStudents, activatedStudents] = await Promise.all([
       prisma.user.findMany({
+        where: { deletedAt: null },
         select: {
           id: true,
           email: true,
@@ -38,9 +39,9 @@ export async function GET() {
         },
         orderBy: { createdAt: "desc" },
       }),
-      prisma.student.count(),
+      prisma.student.count({ where: { deletedAt: null } }),
       prisma.student.count({
-        where: { userId: { not: null } },
+        where: { userId: { not: null }, deletedAt: null },
       }),
     ]);
 
@@ -48,6 +49,7 @@ export async function GET() {
 
     return Response.json({
       users,
+      currentUserId: currentUser.id,
       stats: {
         totalUsers: users.length,
         totalStudents,

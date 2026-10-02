@@ -27,8 +27,13 @@ export async function GET(
     await requirePermission("enrollment:read");
     const { id } = await params;
 
-    const enrollment = await prisma.enrollment.findUnique({
-      where: { id },
+    const enrollment = await prisma.enrollment.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        student: { deletedAt: null },
+        batch: { deletedAt: null, program: { deletedAt: null } },
+      },
       select: {
         ...enrollmentSelect,
         student: {
@@ -96,8 +101,8 @@ export async function PATCH(
       return Response.json({ error: "Invalid request body" }, { status: 400 });
     }
 
-    const existingEnrollment = await prisma.enrollment.findUnique({
-      where: { id },
+    const existingEnrollment = await prisma.enrollment.findFirst({
+      where: { id, deletedAt: null },
       select: {
         id: true,
         studentId: true,
@@ -170,9 +175,53 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { error: "Method Not Allowed" },
-    { status: 405, headers: { Allow: "GET, PATCH" } },
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("enrollment:delete");
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
+      throw new AuthorizationError(403, "Permission denied");
+    }
+
+    const { id } = await params;
+    if (!id.trim()) {
+      return Response.json({ error: "Invalid enrollment ID" }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const enrollment = await transaction.enrollment.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!enrollment) return null;
+
+      const deletedAt = new Date();
+      await transaction.enrollment.update({
+        where: { id: enrollment.id },
+        data: { deletedAt },
+      });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Enrollment",
+        entityId: enrollment.id,
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
+      });
+      return { id: enrollment.id, deletedAt };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!result) {
+      return Response.json({ error: "Enrollment not found" }, { status: 404 });
+    }
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("Failed to soft-delete enrollment", error);
+    return Response.json({ error: "Unable to delete enrollment" }, { status: 500 });
+  }
 }

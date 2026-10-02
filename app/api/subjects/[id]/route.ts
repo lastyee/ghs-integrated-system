@@ -26,8 +26,8 @@ export async function GET(
     await requirePermission("subject:read");
     const { id } = await params;
 
-    const subject = await prisma.subject.findUnique({
-      where: { id },
+    const subject = await prisma.subject.findFirst({
+      where: { id, deletedAt: null },
       select: subjectSelect,
     });
 
@@ -78,8 +78,8 @@ export async function PATCH(
     }
 
     const subject = await prisma.$transaction(async (transaction) => {
-      const previousSubject = await transaction.subject.findUnique({
-        where: { id },
+      const previousSubject = await transaction.subject.findFirst({
+        where: { id, deletedAt: null },
         select: {
           id: true,
           code: true,
@@ -169,67 +169,35 @@ export async function DELETE(
     const { id } = await params;
 
     const result = await prisma.$transaction(async (transaction) => {
-      const subject = await transaction.subject.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          code: true,
-          name: true,
-          _count: {
-            select: {
-              programs: true,
-              schedules: true,
-              assessments: true,
-            },
-          },
-        },
+      const subject = await transaction.subject.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
       });
 
       if (!subject) return { kind: "not-found" as const };
 
-      const dependencies = {
-        programSubjects: subject._count.programs,
-        schedules: subject._count.schedules,
-        assessments: subject._count.assessments,
-      };
-      if (
-        dependencies.programSubjects > 0 ||
-        dependencies.schedules > 0 ||
-        dependencies.assessments > 0
-      ) {
-        return { kind: "blocked" as const, subject, dependencies };
-      }
-
-      await transaction.subject.delete({ where: { id } });
+      const deletedAt = new Date();
+      await transaction.subject.update({
+        where: { id: subject.id },
+        data: { deletedAt },
+      });
       await createAuditLog(transaction, authenticatedUser, {
         action: "DELETE",
         entity: "Subject",
         entityId: subject.id,
-        changes: { deleted: { code: subject.code, name: subject.name }, dependencies },
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
       });
 
-      return { kind: "deleted" as const, id: subject.id, code: subject.code, name: subject.name };
+      return { kind: "deleted" as const, id: subject.id, deletedAt };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     if (result.kind === "not-found") {
       return Response.json({ error: "Subject not found" }, { status: 404 });
     }
-    if (result.kind === "blocked") {
-      const reasons = [
-        result.dependencies.programSubjects > 0 && `${result.dependencies.programSubjects} ProgramSubject link`,
-        result.dependencies.schedules > 0 && `${result.dependencies.schedules} Schedule`,
-        result.dependencies.assessments > 0 && `${result.dependencies.assessments} Assessment`,
-      ].filter(Boolean);
-      return Response.json(
-        {
-          error: `Subject "${result.subject.name}" tidak dapat dihapus karena masih digunakan oleh ${reasons.join(", ")}.`,
-          dependencies: result.dependencies,
-        },
-        { status: 409 },
-      );
-    }
 
-    return Response.json({ data: result }, { status: 200 });
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

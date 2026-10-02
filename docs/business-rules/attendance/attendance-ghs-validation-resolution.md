@@ -198,7 +198,7 @@ Status: **PARTIAL / TBD — GHS**.
 | Student ownership | CONFIRMED | Step 61 authorization specification | Gunakan server-side ownership |
 | Academic Staff scope | TBD — GHS | Permission read ada, data scope tidak ditentukan | Jangan menambah filter/asumsi |
 | Management scope | TBD — GHS | Permission read ada, data scope tidak ditentukan | Jangan menambah filter/asumsi |
-| Delete | BLOCKED | Tidak ada `attendance:delete` | Jangan membuat DELETE |
+| Delete | Phase 2 authorized | Admin/Super Admin-only soft delete | No hard delete or cascade |
 
 ## 4. Unresolved TBD — GHS
 
@@ -316,7 +316,8 @@ Hanya keputusan yang didukung evidence yang masuk kategori CONFIRMED:
     mencegah duplicate attendance pada DB level.
 11. Permission baseline dan student ownership untuk Attendance sudah
     dikonfirmasi pada Step 61.
-12. Tidak ada permission `attendance:delete`.
+12. The Phase 2 user instruction supersedes the Step 61 baseline and
+    authorizes `attendance:delete` for Admin/Super Admin only.
 
 ## 3. Partial Decisions
 

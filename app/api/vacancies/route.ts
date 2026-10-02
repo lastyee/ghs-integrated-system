@@ -49,7 +49,10 @@ export async function GET(request: Request) {
 
     const { employerId, status } = parsedQuery.data;
 
-    const where: Prisma.VacancyWhereInput = {};
+    const where: Prisma.VacancyWhereInput = {
+      deletedAt: null,
+      employer: { is: { deletedAt: null } },
+    };
 
     if (employerId) {
       where.employerId = employerId;
@@ -109,7 +112,7 @@ export async function POST(request: Request) {
 
     // Verify target employer exists
     const employer = await prisma.employer.findUnique({
-      where: { id: data.employerId },
+      where: { id: data.employerId, deletedAt: null },
       select: { id: true },
     });
 

@@ -20,6 +20,7 @@ import {
 import { useEffect, useState, useMemo } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 export type VacancyItem = {
   id: string;
@@ -58,6 +59,7 @@ const initialFormValues: VacancyFormValues = {
 };
 
 export function VacanciesPage({ userRole = "" }: { userRole?: string }) {
+  const { showToast } = useToast();
   const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [vacancies, setVacancies] = useState<VacancyItem[]>([]);
   const [employers, setEmployers] = useState<EmployerOption[]>([]);
@@ -298,7 +300,7 @@ export function VacanciesPage({ userRole = "" }: { userRole?: string }) {
       if (!response.ok) {
         throw new Error(payload.message || payload.error || `Gagal menghapus lowongan (HTTP ${response.status})`);
       }
-      setNotice(`Lowongan "${deleteCandidate.title}" berhasil dihapus.`);
+      showToast("success", `Lowongan "${deleteCandidate.title}" berhasil disembunyikan dari data aktif.`);
       setDeleteCandidate(null);
       setRefreshTrigger((previous) => previous + 1);
     } catch (err) {
@@ -628,10 +630,8 @@ export function VacanciesPage({ userRole = "" }: { userRole?: string }) {
               )}
               {deleteCandidate && (
                 <DeleteConfirmationDialog
-                  title="Hapus Vacancy?"
                   recordName={deleteCandidate.title}
-                  description="Vacancy akan dihapus permanen hanya jika tidak memiliki Application atau Placement. Record terkait tidak akan dihapus; server akan menolak penghapusan jika masih ada dependency."
-                  confirmLabel="Hapus Vacancy"
+                  description="Lamaran dan penempatan yang terkait tetap tersimpan."
                   pending={deletePending}
                   error={deleteError}
                   onCancel={() => {

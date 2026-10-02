@@ -291,14 +291,6 @@ async function getCounts() {
 
 async function cleanup() {
   if (created.enrollmentIds.length > 0) {
-    await prisma.auditLog.deleteMany({
-      where: {
-        entity: "Enrollment",
-        entityId: { in: created.enrollmentIds },
-      },
-    });
-  }
-  if (created.enrollmentIds.length > 0) {
     await prisma.enrollment.deleteMany({ where: { id: { in: created.enrollmentIds } } });
   }
   if (created.batchIds.length > 0) {

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { ArrowLeft, BookOpen, GraduationCap, Loader2, AlertCircle, Trash2 } from "lucide-react";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 interface BatchSummary {
   id: string;
@@ -23,6 +24,7 @@ interface ProgramDetailData {
 }
 
 export function ProgramDetail({ programId, userRole = "" }: { programId: string; userRole?: string }) {
+  const { showToast } = useToast();
   const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [program, setProgram] = useState<ProgramDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -78,6 +80,7 @@ export function ProgramDetail({ programId, userRole = "" }: { programId: string;
         throw new Error(payload.error || payload.message || `Gagal menghapus program (HTTP ${response.status})`);
       }
       setDeletedName(program.name);
+      showToast("success", `Program "${program.name}" berhasil disembunyikan dari data aktif.`);
       setProgram(null);
       setDeleteDialogOpen(false);
     } catch (err) {
@@ -224,10 +227,8 @@ export function ProgramDetail({ programId, userRole = "" }: { programId: string;
       </div>
       {canDelete && deleteDialogOpen && (
         <DeleteConfirmationDialog
-          title="Hapus Program?"
           recordName={program.name}
-          description="Program akan dihapus permanen hanya jika tidak memiliki Batch, Certificate, atau relasi Subject. Data terkait tidak akan dihapus."
-          confirmLabel="Hapus Program"
+          description="Batch, sertifikat, dan relasi mata pelajaran yang terkait tetap tersimpan."
           pending={deletePending}
           error={deleteError}
           onCancel={() => {

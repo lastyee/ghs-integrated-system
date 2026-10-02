@@ -20,6 +20,7 @@ export const employerDetailSelect = {
   createdAt: true,
   updatedAt: true,
   vacancies: {
+    where: { deletedAt: null },
     select: {
       id: true,
       title: true,
@@ -43,8 +44,8 @@ export async function GET(
     await requirePermission("employer:read");
     const { id } = await params;
 
-    const employer = await prisma.employer.findUnique({
-      where: { id },
+    const employer = await prisma.employer.findFirst({
+      where: { id, deletedAt: null },
       select: employerDetailSelect,
     });
 
@@ -99,8 +100,8 @@ export async function PATCH(
 
     const data = parsed.data;
 
-    const existing = await prisma.employer.findUnique({
-      where: { id },
+    const existing = await prisma.employer.findFirst({
+      where: { id, deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -123,6 +124,7 @@ export async function PATCH(
     if (data.name && data.name.toLowerCase() !== existing.name.toLowerCase()) {
       const duplicate = await prisma.employer.findFirst({
         where: {
+          deletedAt: null,
           id: { not: id },
           name: {
             equals: data.name,
@@ -203,47 +205,34 @@ export async function DELETE(
     const { id } = await params;
 
     const result = await prisma.$transaction(async (transaction) => {
-      const employer = await transaction.employer.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          name: true,
-          _count: { select: { vacancies: true, placements: true } },
-        },
+      const employer = await transaction.employer.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
       });
 
       if (!employer) return { kind: "not-found" as const };
 
-      const dependencies = employer._count;
-      if (dependencies.vacancies > 0 || dependencies.placements > 0) {
-        return { kind: "blocked" as const, employer, dependencies };
-      }
-
-      await transaction.employer.delete({ where: { id } });
+      const deletedAt = new Date();
+      await transaction.employer.update({
+        where: { id: employer.id },
+        data: { deletedAt },
+      });
       await createAuditLog(transaction, authenticatedUser, {
         action: "DELETE",
         entity: "Employer",
         entityId: employer.id,
-        changes: { deleted: { name: employer.name }, dependencies },
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
       });
 
-      return { kind: "deleted" as const, id: employer.id, name: employer.name };
+      return { kind: "deleted" as const, id: employer.id, deletedAt };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     if (result.kind === "not-found") {
       return Response.json({ message: "Employer not found." }, { status: 404 });
     }
-    if (result.kind === "blocked") {
-      return Response.json(
-        {
-          message: `Employer "${result.employer.name}" cannot be deleted because it still has dependent records.`,
-          dependencies: result.dependencies,
-        },
-        { status: 409 },
-      );
-    }
-
-    return Response.json({ data: result }, { status: 200 });
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);
@@ -252,7 +241,7 @@ export async function DELETE(
       if (error.code === "P2025") {
         return Response.json({ message: "Employer not found." }, { status: 404 });
       }
-      if (error.code === "P2003" || error.code === "P2034") {
+      if (error.code === "P2034") {
         const { id } = await params;
         const [vacancies, placements] = await Promise.all([
           prisma.vacancy.count({ where: { employerId: id } }),

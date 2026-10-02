@@ -20,8 +20,14 @@ export async function GET(
     const authenticatedUser = await requirePermission("certificate:read");
     const { id } = await params;
 
-    const certificate = await prisma.certificate.findUnique({
-      where: { id },
+    const certificate = await prisma.certificate.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        student: { deletedAt: null },
+        program: { deletedAt: null },
+        batch: { deletedAt: null },
+      },
       select: {
         id: true,
         studentId: true,

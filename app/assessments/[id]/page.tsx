@@ -6,6 +6,7 @@ export default async function AssessmentDetailRoute({ params }: { params: Promis
   const { id } = await params;
   const user = await requireAuthenticatedUser();
   const canDelete = await userHasPermission(user.id, "assessment:delete");
+  const canDeleteScores = await userHasPermission(user.id, "assessment-score:delete");
 
-  return <AppShell title="Assessment Detail" subtitle="Detail assessment dan nilai peserta" activeLabel="Penilaian"><AssessmentDetail assessmentId={id} canDelete={canDelete} /></AppShell>;
+  return <AppShell title="Assessment Detail" subtitle="Detail assessment dan nilai peserta" activeLabel="Penilaian"><AssessmentDetail assessmentId={id} canDelete={canDelete} canDeleteScores={canDeleteScores} /></AppShell>;
 }

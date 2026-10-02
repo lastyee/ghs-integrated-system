@@ -4,6 +4,7 @@ import Link from "next/link";
 import { AlertCircle, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 export type ProgramItem = {
   id: string;
@@ -27,6 +28,7 @@ const emptyForm: FormValues = {
 };
 
 export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }) {
+  const { showToast } = useToast();
   const [programs, setPrograms] = useState<ProgramItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -91,7 +93,7 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
       if (!response.ok) {
         throw new Error(payload.error || payload.message || `Gagal menghapus program (HTTP ${response.status})`);
       }
-      setNotice(`Program "${deleteCandidate.name}" berhasil dihapus.`);
+      showToast("success", `Program "${deleteCandidate.name}" berhasil disembunyikan dari data aktif.`);
       setDeleteCandidate(null);
       reloadPrograms();
     } catch (err) {
@@ -471,10 +473,8 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
       )}
       {deleteCandidate && (
         <DeleteConfirmationDialog
-          title="Hapus Program?"
           recordName={deleteCandidate.name}
-          description="Program akan dihapus permanen jika tidak memiliki Batch, Certificate, atau relasi Subject. Record terkait tidak akan dihapus; permintaan akan ditolak jika masih ada dependency."
-          confirmLabel="Hapus Program"
+          description="Batch, sertifikat, dan relasi mata pelajaran yang terkait tetap tersimpan."
           pending={deletePending}
           error={deleteError}
           onCancel={() => {

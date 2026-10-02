@@ -3,6 +3,8 @@ const { PrismaClient } = require("@prisma/client");
 const bcrypt = require("bcryptjs");
 
 const prisma = new PrismaClient();
+const DEMO_STUDENT_EMAIL = "student.demo@ghs.local";
+const DEMO_STUDENT_NIM = "260405066";
 
 const roles = [
   "SUPER_ADMIN",
@@ -15,64 +17,73 @@ const roles = [
 ];
 
 const permissionDefinitions = [
+  ["user:delete", "delete", "user", "Disable a user account without changing linked profiles or history."],
   ["student:create", "create", "student"],
   ["student:read", "read", "student"],
   ["student:update", "update", "student"],
-  ["student:delete", "delete", "student"],
+  ["student:delete", "delete", "student", "Soft-archive a student; the linked user and historical records remain intact."],
   ["program:create", "create", "program"],
   ["program:read", "read", "program"],
   ["program:update", "update", "program"],
-  ["program:delete", "delete", "program"],
+  ["program:delete", "delete", "program", "Soft-archive the program; batches and certificates remain intact."],
   ["subject:create", "create", "subject"],
   ["subject:read", "read", "subject"],
   ["subject:update", "update", "subject"],
-  ["subject:delete", "delete", "subject"],
+  ["subject:delete", "delete", "subject", "Soft-archive the subject; schedules and assessments remain intact."],
   ["batch:create", "create", "batch"],
   ["batch:read", "read", "batch"],
   ["batch:update", "update", "batch"],
-  ["batch:delete", "delete", "batch", "Delete a batch only when it has no enrollments, classes, schedules, or certificates."],
-  ["instructor:delete", "delete", "instructor", "Delete an instructor only when it has no classes, schedules, or linked user."],
+  ["batch:delete", "delete", "batch", "Soft-archive a batch; enrollments, classes, schedules, and certificates remain intact."],
+  ["instructor:delete", "delete", "instructor", "Soft-archive an instructor; linked users, classes, and schedules remain intact."],
   ["enrollment:create", "create", "enrollment"],
   ["enrollment:read", "read", "enrollment"],
   ["enrollment:update", "update", "enrollment"],
+  ["enrollment:delete", "delete", "enrollment", "Soft-archive an enrollment without changing linked records."],
   ["class:create", "create", "class"],
   ["class:read", "read", "class"],
   ["class:update", "update", "class"],
+  ["class:delete", "delete", "class", "Soft-archive a class; schedules, attendance, and assessments remain intact."],
   ["schedule:create", "create", "schedule"],
   ["schedule:read", "read", "schedule"],
   ["schedule:update", "update", "schedule"],
+  ["schedule:delete", "delete", "schedule", "Soft-archive a schedule; attendance records remain intact."],
   ["attendance:create", "create", "attendance"],
   ["attendance:read", "read", "attendance"],
   ["attendance:update", "update", "attendance"],
+  ["attendance:delete", "delete", "attendance", "Soft-archive an attendance record; the student and schedule remain intact."],
   ["assessment:create", "create", "assessment"],
   ["assessment:read", "read", "assessment"],
   ["assessment:update", "update", "assessment"],
-  ["assessment:delete", "delete", "assessment", "Delete an OPEN assessment only when it has no scores."],
+  ["assessment:delete", "delete", "assessment", "Soft-archive an assessment; assessment scores remain intact."],
+  ["assessment-score:delete", "delete", "assessmentScore", "Soft-archive a score; the assessment and student remain intact."],
   ["document:create", "create", "document"],
   ["document:read", "read", "document"],
   ["document:update", "update", "document"],
   ["document:verify", "verify", "document"],
-  ["document:delete", "delete", "document", "Delete non-verified documents and their stored objects."],
+  ["document:delete", "delete", "document", "Soft-archive a document; its storage object is retained."],
   ["employer:create", "create", "employer"],
   ["employer:read", "read", "employer"],
   ["employer:update", "update", "employer"],
-  ["employer:delete", "delete", "employer", "Delete an employer only when it has no vacancies or placements."],
+  ["employer:delete", "delete", "employer", "Soft-archive an employer; vacancies and placements remain intact."],
   ["vacancy:create", "create", "vacancy"],
   ["vacancy:read", "read", "vacancy"],
   ["vacancy:update", "update", "vacancy"],
-  ["vacancy:delete", "delete", "vacancy", "Delete a vacancy only when it has no applications or placements."],
+  ["vacancy:delete", "delete", "vacancy", "Soft-archive a vacancy; applications and placements remain intact."],
   ["vacancy:close", "close", "vacancy"],
   ["application:create", "create", "application"],
   ["application:read", "read", "application"],
   ["application:update", "update", "application"],
+  ["application:delete", "delete", "application", "Soft-archive an application; interviews and placements remain intact."],
   ["interview:create", "create", "interview"],
   ["interview:read", "read", "interview"],
   ["interview:update", "update", "interview"],
   ["interview:result", "result", "interview"],
+  ["interview:delete", "delete", "interview", "Soft-archive an interview; the application remains intact."],
   ["placement:create", "create", "placement"],
   ["placement:read", "read", "placement"],
   ["placement:update", "update", "placement"],
   ["placement:verify", "verify", "placement"],
+  ["placement:delete", "delete", "placement", "Soft-archive a placement; linked career and application history remain intact."],
   ["certificate:create", "create", "certificate"],
   ["certificate:revoke", "revoke", "certificate"],
   ["certificate:read", "read", "certificate"],
@@ -89,12 +100,11 @@ const rolePermissionNames = {
     "student:create", "student:read", "student:update",
     "program:create", "program:read", "program:update",
     "subject:create", "subject:read", "subject:update",
-    "batch:create", "batch:read", "batch:update", "batch:delete",
-    "instructor:delete",
+    "batch:create", "batch:read", "batch:update",
     "enrollment:create", "enrollment:read", "enrollment:update",
     "class:create", "class:read", "class:update",
     "schedule:create", "schedule:read", "schedule:update",
-    "attendance:read", "assessment:read", "assessment:delete", "document:read", "document:delete",
+    "attendance:read", "assessment:read", "document:read",
   ],
   INSTRUCTOR: [
     "student:read", "class:read", "schedule:read",
@@ -102,7 +112,7 @@ const rolePermissionNames = {
     "assessment:create", "assessment:read", "assessment:update",
   ],
   PLACEMENT_STAFF: [
-    "student:read", "document:read", "document:delete",
+    "student:read", "document:read",
     "employer:create", "employer:read", "employer:update",
     "vacancy:create", "vacancy:read", "vacancy:update", "vacancy:close",
     "application:create", "application:read", "application:update",
@@ -137,6 +147,33 @@ function requiredSecret(name) {
 async function main() {
   const superAdminPassword = requiredSecret("DEMO_SUPER_ADMIN_PASSWORD");
   const studentPassword = requiredSecret("DEMO_STUDENT_PASSWORD");
+
+  const [existingDemoUser, existingDemoStudent] = await Promise.all([
+    prisma.user.findUnique({
+      where: { email: DEMO_STUDENT_EMAIL },
+      select: { id: true, student: { select: { id: true } } },
+    }),
+    prisma.student.findUnique({
+      where: { nim: DEMO_STUDENT_NIM },
+      select: { id: true, userId: true },
+    }),
+  ]);
+  if (
+    existingDemoStudent?.userId &&
+    existingDemoStudent.userId !== existingDemoUser?.id
+  ) {
+    throw new Error(
+      `Seed safety check failed: demo Student NIM ${DEMO_STUDENT_NIM} is linked to another User.`
+    );
+  }
+  if (
+    existingDemoUser?.student &&
+    existingDemoUser.student.id !== existingDemoStudent?.id
+  ) {
+    throw new Error(
+      `Seed safety check failed: ${DEMO_STUDENT_EMAIL} is linked to another Student.`
+    );
+  }
 
   const permissionRecords = new Map();
   for (const [name, action, subject, description] of permissionDefinitions) {
@@ -199,11 +236,11 @@ async function main() {
     },
   });
 
-  await prisma.user.upsert({
-    where: { email: "student.demo@ghs.local" },
+  const demoStudentUser = await prisma.user.upsert({
+    where: { email: DEMO_STUDENT_EMAIL },
     update: { name: "Demo Student", roleId: studentRole.id, passwordHash: studentHash },
     create: {
-      email: "student.demo@ghs.local",
+      email: DEMO_STUDENT_EMAIL,
       name: "Demo Student",
       passwordHash: studentHash,
       roleId: studentRole.id,
@@ -249,7 +286,7 @@ async function main() {
   const ghi07Students = [
     { nim: "260405064", name: "RAFLI AULIA RAHMAN" },
     { nim: "260405065", name: "SAHRUL GUNAWAN" },
-    { nim: "260405066", name: "TIARA ISMI LAILA" },
+    { nim: DEMO_STUDENT_NIM, name: "TIARA ISMI LAILA" },
     { nim: "260405067", name: "KHALIF FAUZI" },
     { nim: "260405068", name: "SUCI WALIYAH" },
     { nim: "260405069", name: "ISMATULLAH MAULANA" },
@@ -335,6 +372,36 @@ async function main() {
         },
       });
     }
+  }
+
+  const demoStudent = await prisma.student.findUnique({
+    where: { nim: DEMO_STUDENT_NIM },
+    select: { id: true, userId: true },
+  });
+  if (!demoStudent) {
+    throw new Error(
+      `Seed failed: demo Student NIM ${DEMO_STUDENT_NIM} was not found.`
+    );
+  }
+  if (demoStudent.userId && demoStudent.userId !== demoStudentUser.id) {
+    throw new Error(
+      `Seed safety check failed: demo Student NIM ${DEMO_STUDENT_NIM} is linked to another User.`
+    );
+  }
+  const studentLinkedToDemoUser = await prisma.student.findUnique({
+    where: { userId: demoStudentUser.id },
+    select: { id: true },
+  });
+  if (studentLinkedToDemoUser && studentLinkedToDemoUser.id !== demoStudent.id) {
+    throw new Error(
+      `Seed safety check failed: ${DEMO_STUDENT_EMAIL} is linked to another Student.`
+    );
+  }
+  if (demoStudent.userId !== demoStudentUser.id) {
+    await prisma.student.update({
+      where: { id: demoStudent.id },
+      data: { userId: demoStudentUser.id },
+    });
   }
 
   const instructorNames = [

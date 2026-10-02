@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Edit3, Eye, Loader2, Plus, RotateCcw, Search, X, AlertCircle, Users } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 type EnrollmentStatus = "ACTIVE" | "COMPLETED" | "TRANSFERRED" | "DROPPED";
 
@@ -59,6 +60,7 @@ export function EnrollmentsPage({ userRole }: EnrollmentsPageProps) {
     userRole === "SUPER_ADMIN" ||
     userRole === "ADMIN" ||
     userRole === "ACADEMIC_STAFF";
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
 
   const [enrollments, setEnrollments] = useState<EnrollmentData[]>([]);
   const [students, setStudents] = useState<StudentOption[]>([]);
@@ -482,6 +484,15 @@ export function EnrollmentsPage({ userRole }: EnrollmentsPageProps) {
                             >
                               <Edit3 className="size-4" />
                             </button>
+                          )}
+                          {canDelete && (
+                            <SoftDeleteAction
+                              endpoint={`/api/enrollments/${item.id}`}
+                              recordName="Enrollment"
+                              identifier={`${item.student?.name || item.studentId} / ${item.batch?.name || item.batchId}`}
+                              description="Enrollment akan disembunyikan dari data aktif. Riwayat peserta dan relasi batch tetap tersimpan."
+                              onDeleted={reloadEnrollments}
+                            />
                           )}
                         </div>
                       </td>

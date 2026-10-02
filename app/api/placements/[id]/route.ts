@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   AuthenticatedUser,
   AuthorizationError,
@@ -25,8 +25,31 @@ export async function GET(
     const authenticatedUser = await requirePermission("placement:read");
     const { id } = await params;
 
-    const placement = await prisma.placement.findUnique({
-      where: { id },
+    const placement = await prisma.placement.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        student: { deletedAt: null },
+        employer: { deletedAt: null },
+        OR: [
+          { vacancyId: null },
+          { vacancy: { deletedAt: null, employer: { deletedAt: null } } },
+        ],
+        AND: [
+          {
+            OR: [
+              { applicationId: null },
+              {
+                application: {
+                  deletedAt: null,
+                  student: { deletedAt: null },
+                  vacancy: { deletedAt: null, employer: { deletedAt: null } },
+                },
+              },
+            ],
+          },
+        ],
+      },
       select: placementDetailSelect,
     });
 
@@ -97,8 +120,8 @@ export async function PATCH(
       authenticatedUser = await requirePermission("placement:update");
     }
 
-    const existing = await prisma.placement.findUnique({
-      where: { id },
+    const existing = await prisma.placement.findFirst({
+      where: { id, deletedAt: null },
       select: {
         id: true,
         status: true,
@@ -273,12 +296,53 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    {
-      message:
-        "Placements cannot be deleted; historical records must be preserved.",
-    },
-    { status: 405, headers: { Allow: "GET, PATCH" } }
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("placement:delete");
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
+      throw new AuthorizationError(403, "Permission denied");
+    }
+
+    const { id } = await params;
+    if (!id.trim()) {
+      return Response.json({ message: "Invalid placement ID." }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const placement = await transaction.placement.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!placement) return null;
+
+      const deletedAt = new Date();
+      await transaction.placement.update({
+        where: { id: placement.id },
+        data: { deletedAt },
+      });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Placement",
+        entityId: placement.id,
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
+      });
+      return { id: placement.id, deletedAt };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!result) {
+      return Response.json({ message: "Placement not found." }, { status: 404 });
+    }
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("Failed to soft-delete placement", error);
+    return Response.json({ message: "Unable to delete placement." }, { status: 500 });
+  }
 }

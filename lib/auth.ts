@@ -19,12 +19,21 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
           return null
         }
 
-        const user = await prisma.user.findUnique({
-          where: { email: credentials.email as string },
-          include: { role: true }
+        const user = await prisma.user.findFirst({
+          where: {
+            email: credentials.email as string,
+            deletedAt: null,
+          },
+          include: {
+            role: true,
+            student: { select: { deletedAt: true } },
+          }
         })
 
-        if (!user) {
+        if (
+          !user ||
+          (user.role.name === "STUDENT" && user.student?.deletedAt)
+        ) {
           return null
         }
 

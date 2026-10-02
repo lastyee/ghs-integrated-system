@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   AuthorizationError,
   authorizationErrorResponse,
@@ -6,6 +6,7 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import { requireInstructorClassAccess } from "@/lib/instructor-ownership";
 import { scoreUpdateSchema } from "@/schemas/assessment";
 
 const prisma = new PrismaClient();
@@ -34,13 +35,33 @@ export async function GET(
   try {
     const { id, scoreId } = await props.params;
     const authenticatedUser = await requirePermission("assessment:read");
+    const assessment = await prisma.assessment.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        class: {
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+        },
+        subject: { deletedAt: null },
+      },
+      select: { id: true, classId: true },
+    });
 
-    const score = await prisma.assessmentScore.findUnique({
-      where: { id: scoreId },
+    if (!assessment) {
+      return Response.json(
+        { message: "Assessment not found." },
+        { status: 404 }
+      );
+    }
+
+    const score = await prisma.assessmentScore.findFirst({
+      where: { id: scoreId, assessmentId: id, deletedAt: null, student: { deletedAt: null } },
       select: scoreDetailSelect,
     });
 
-    if (!score || score.assessmentId !== id) {
+    if (!score) {
       return Response.json(
         { message: "Score not found for the specified assessment." },
         { status: 404 }
@@ -56,6 +77,8 @@ export async function GET(
       if (!student || student.id !== score.studentId) {
         throw new ForbiddenError();
       }
+    } else if (authenticatedUser.role === "INSTRUCTOR") {
+      await requireInstructorClassAccess(authenticatedUser, assessment.classId);
     }
 
     return Response.json(score, { status: 200 });
@@ -78,13 +101,26 @@ export async function PATCH(
     const { id, scoreId } = await props.params;
     const authenticatedUser = await requirePermission("assessment:update");
 
-    if (authenticatedUser.role !== "SUPER_ADMIN" && authenticatedUser.role !== "ADMIN") {
+    if (
+      authenticatedUser.role !== "SUPER_ADMIN" &&
+      authenticatedUser.role !== "ADMIN" &&
+      authenticatedUser.role !== "INSTRUCTOR"
+    ) {
       throw new ForbiddenError();
     }
 
-    const assessment = await prisma.assessment.findUnique({
-      where: { id },
-      select: { id: true, maxScore: true },
+    const assessment = await prisma.assessment.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        class: {
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+        },
+        subject: { deletedAt: null },
+      },
+      select: { id: true, maxScore: true, classId: true },
     });
 
     if (!assessment) {
@@ -93,12 +129,15 @@ export async function PATCH(
         { status: 404 }
       );
     }
+    if (authenticatedUser.role === "INSTRUCTOR") {
+      await requireInstructorClassAccess(authenticatedUser, assessment.classId);
+    }
 
     // Step 66C: Per GHS policy, score correction is NOT locked when assessment status is COMPLETED
     // because finalization/lock policy is currently TBD in official GHS regulations.
 
-    const existingScore = await prisma.assessmentScore.findUnique({
-      where: { id: scoreId },
+    const existingScore = await prisma.assessmentScore.findFirst({
+      where: { id: scoreId, assessmentId: id, deletedAt: null, student: { deletedAt: null } },
     });
 
     if (!existingScore) {
@@ -199,9 +238,68 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { message: "Method Not Allowed. Score deletion is not supported." },
-    { status: 405, headers: { Allow: "GET, PATCH" } }
-  );
+export async function DELETE(
+  _request: Request,
+  props: { params: Promise<{ id: string; scoreId: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("assessment-score:delete");
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
+      throw new ForbiddenError();
+    }
+
+    const { id, scoreId } = await props.params;
+    if (!id.trim() || !scoreId.trim()) {
+      return Response.json({ message: "Invalid assessment score ID." }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const assessment = await transaction.assessment.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          class: {
+            deletedAt: null,
+            batch: { deletedAt: null, program: { deletedAt: null } },
+            instructor: { deletedAt: null },
+          },
+          subject: { deletedAt: null },
+        },
+        select: { id: true, classId: true },
+      });
+      if (!assessment) return { kind: "not-found" as const };
+
+      const score = await transaction.assessmentScore.findFirst({
+        where: { id: scoreId, assessmentId: id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!score) return { kind: "not-found" as const };
+
+      const deletedAt = new Date();
+      await transaction.assessmentScore.update({
+        where: { id: score.id },
+        data: { deletedAt },
+      });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "AssessmentScore",
+        entityId: score.id,
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
+      });
+      return { kind: "deleted" as const, id: score.id, deletedAt };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (result.kind === "not-found") {
+      return Response.json({ message: "Assessment score not found." }, { status: 404 });
+    }
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("Failed to soft-delete assessment score", error);
+    return Response.json({ message: "Unable to delete assessment score." }, { status: 500 });
+  }
 }

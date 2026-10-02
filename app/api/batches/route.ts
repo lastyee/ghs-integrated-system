@@ -19,9 +19,16 @@ const batchSelect = {
   updatedAt: true,
   _count: {
     select: {
-      enrollments: true,
-      classes: true,
-      certificates: true,
+      enrollments: {
+        where: { deletedAt: null, student: { deletedAt: null } },
+      },
+      classes: {
+        where: {
+          deletedAt: null,
+          instructor: { deletedAt: null },
+        },
+      },
+      certificates: { where: { status: "ACTIVE" } },
     },
   },
   program: {
@@ -38,6 +45,7 @@ export async function GET() {
     await requirePermission("batch:read");
 
     const batches = await prisma.batch.findMany({
+      where: { deletedAt: null, program: { deletedAt: null } },
       select: batchSelect,
       orderBy: [{ startDate: "asc" }, { name: "asc" }, { id: "asc" }],
     });
@@ -71,7 +79,7 @@ export async function POST(request: Request) {
     }
 
     const program = await prisma.program.findUnique({
-      where: { id: parsed.data.programId },
+      where: { id: parsed.data.programId, deletedAt: null },
       select: { id: true },
     });
 

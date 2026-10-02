@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   AuthorizationError,
   authorizationErrorResponse,
@@ -25,8 +25,16 @@ export async function GET(
     const authenticatedUser = await requirePermission("interview:read");
     const { id } = await params;
 
-    const interview = await prisma.interview.findUnique({
-      where: { id },
+    const interview = await prisma.interview.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        application: {
+          deletedAt: null,
+          student: { deletedAt: null },
+          vacancy: { deletedAt: null, employer: { deletedAt: null } },
+        },
+      },
       select: interviewDetailSelect,
     });
 
@@ -103,8 +111,8 @@ export async function PATCH(
 
       const data = parsed.data;
 
-      const existing = await prisma.interview.findUnique({
-        where: { id },
+      const existing = await prisma.interview.findFirst({
+        where: { id, deletedAt: null },
         select: {
           id: true,
           status: true,
@@ -201,8 +209,8 @@ export async function PATCH(
 
       const data = parsed.data;
 
-      const existing = await prisma.interview.findUnique({
-        where: { id },
+      const existing = await prisma.interview.findFirst({
+        where: { id, deletedAt: null },
         select: {
           id: true,
           status: true,
@@ -308,12 +316,53 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    {
-      message:
-        "Method Not Allowed. Interview deletion is not permitted. Historical records must be preserved.",
-    },
-    { status: 405, headers: { Allow: "GET, PATCH" } }
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("interview:delete");
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
+      throw new AuthorizationError(403, "Permission denied");
+    }
+
+    const { id } = await params;
+    if (!id.trim()) {
+      return Response.json({ message: "Invalid interview ID." }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const interview = await transaction.interview.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!interview) return null;
+
+      const deletedAt = new Date();
+      await transaction.interview.update({
+        where: { id: interview.id },
+        data: { deletedAt },
+      });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Interview",
+        entityId: interview.id,
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
+      });
+      return { id: interview.id, deletedAt };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!result) {
+      return Response.json({ message: "Interview not found." }, { status: 404 });
+    }
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("Failed to soft-delete interview", error);
+    return Response.json({ message: "Unable to delete interview." }, { status: 500 });
+  }
 }

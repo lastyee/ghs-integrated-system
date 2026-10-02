@@ -5,6 +5,7 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import { requireLinkedInstructor } from "@/lib/instructor-ownership";
 import { scheduleCreateSchema } from "@/schemas/schedule";
 
 const prisma = new PrismaClient();
@@ -52,9 +53,23 @@ const scheduleSelect = {
 
 export async function GET() {
   try {
-    await requirePermission("schedule:read");
+    const authenticatedUser = await requirePermission("schedule:read");
+    const where = {
+      deletedAt: null,
+      class: {
+        deletedAt: null,
+        batch: { deletedAt: null, program: { deletedAt: null } },
+        instructor: { deletedAt: null },
+      },
+      subject: { deletedAt: null },
+      instructor: { deletedAt: null },
+      ...(authenticatedUser.role === "INSTRUCTOR"
+        ? { instructorId: (await requireLinkedInstructor(authenticatedUser)).id }
+        : {}),
+    };
 
     const schedules = await prisma.schedule.findMany({
+      where,
       select: scheduleSelect,
       orderBy: [{ date: "asc" }, { startTime: "asc" }, { id: "asc" }],
     });
@@ -98,15 +113,20 @@ export async function POST(request: Request) {
 
     const [classRecord, subject, instructor] = await Promise.all([
       prisma.class.findUnique({
-        where: { id: parsed.data.classId },
+        where: {
+          id: parsed.data.classId,
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+        },
         select: { id: true },
       }),
       prisma.subject.findUnique({
-        where: { id: parsed.data.subjectId },
+        where: { id: parsed.data.subjectId, deletedAt: null },
         select: { id: true },
       }),
       prisma.instructor.findUnique({
-        where: { id: parsed.data.instructorId },
+        where: { id: parsed.data.instructorId, deletedAt: null },
         select: { id: true },
       }),
     ]);

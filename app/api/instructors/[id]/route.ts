@@ -14,7 +14,7 @@ export async function DELETE(
 ) {
   try {
     const authenticatedUser = await requirePermission("instructor:delete");
-    if (!["SUPER_ADMIN", "ADMIN", "ACADEMIC_STAFF"].includes(authenticatedUser.role)) {
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
       throw new AuthorizationError(403, "Permission denied");
     }
 
@@ -24,55 +24,34 @@ export async function DELETE(
     }
 
     const result = await prisma.$transaction(async (transaction) => {
-      const instructor = await transaction.instructor.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          name: true,
-          userId: true,
-          _count: { select: { classes: true, schedules: true } },
-        },
+      const instructor = await transaction.instructor.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
       });
 
       if (!instructor) return { kind: "not-found" as const };
 
-      const dependencies = {
-        classes: instructor._count.classes,
-        schedules: instructor._count.schedules,
-        linkedUser: instructor.userId !== null,
-      };
-      if (dependencies.classes > 0 || dependencies.schedules > 0 || dependencies.linkedUser) {
-        return { kind: "blocked" as const, dependencies };
-      }
-
-      await transaction.instructor.delete({ where: { id } });
+      const deletedAt = new Date();
+      await transaction.instructor.update({
+        where: { id: instructor.id },
+        data: { deletedAt },
+      });
       await createAuditLog(transaction, authenticatedUser, {
-        action: "INSTRUCTOR_DELETE",
+        action: "DELETE",
         entity: "Instructor",
         entityId: instructor.id,
-        changes: {
-          deleted: { name: instructor.name },
-          dependencies,
-        },
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
       });
 
-      return { kind: "deleted" as const };
+      return { kind: "deleted" as const, id: instructor.id, deletedAt };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     if (result.kind === "not-found") {
       return Response.json({ error: "Instructor not found" }, { status: 404 });
     }
-    if (result.kind === "blocked") {
-      return Response.json(
-        {
-          error: "Instructor cannot be deleted because it is linked to Class, Schedule, or User.",
-          dependencies: result.dependencies,
-        },
-        { status: 409 },
-      );
-    }
-
-    return Response.json({ success: true }, { status: 200 });
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);
@@ -85,29 +64,15 @@ export async function DELETE(
     }
     if (
       error instanceof Prisma.PrismaClientKnownRequestError &&
-      ["P2003", "P2034"].includes(error.code)
+      error.code === "P2034"
     ) {
       const { id } = await params;
-      const instructor = await prisma.instructor.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          userId: true,
-          _count: { select: { classes: true, schedules: true } },
-        },
-      });
+      const instructor = await prisma.instructor.findFirst({ where: { id, deletedAt: null }, select: { id: true } });
       if (!instructor) {
         return Response.json({ error: "Instructor not found" }, { status: 404 });
       }
       return Response.json(
-        {
-          error: "Instructor cannot be deleted because it is linked to Class, Schedule, or User.",
-          dependencies: {
-            classes: instructor._count.classes,
-            schedules: instructor._count.schedules,
-            linkedUser: instructor.userId !== null,
-          },
-        },
+        { error: "Instructor changed during deletion. Please retry." },
         { status: 409 },
       );
     }

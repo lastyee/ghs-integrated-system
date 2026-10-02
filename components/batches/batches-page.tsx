@@ -5,6 +5,7 @@ import Link from "next/link";
 import { Calendar, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X, AlertCircle, Trash2 } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 interface ProgramItem {
   id: string;
@@ -52,6 +53,7 @@ interface BatchesPageProps {
 }
 
 export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
+  const { showToast } = useToast();
   const canMutate =
     userRole === "SUPER_ADMIN" ||
     userRole === "ADMIN" ||
@@ -129,7 +131,7 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
       if (!response.ok) {
         throw new Error(payload.error || `Gagal menghapus batch (HTTP ${response.status})`);
       }
-      setNotice(`Batch "${deleteCandidate.name}" berhasil dihapus.`);
+      showToast("success", `Batch "${deleteCandidate.name}" berhasil disembunyikan dari data aktif.`);
       setDeleteCandidate(null);
       reloadBatches();
     } catch (err) {
@@ -431,35 +433,20 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
                               <Edit3 className="size-4" />
                             </button>
                           )}
-                          {canDelete && (() => {
-                            const dependencies = batch._count;
-                            const blocked =
-                              dependencies.enrollments > 0 ||
-                              dependencies.classes > 0 ||
-                              dependencies.certificates > 0;
-                            const reason = [
-                              dependencies.enrollments > 0 && `${dependencies.enrollments} Enrollment`,
-                              dependencies.classes > 0 && `${dependencies.classes} Class`,
-                              dependencies.certificates > 0 && `${dependencies.certificates} Certificate`,
-                            ].filter(Boolean).join(", ");
-                            return (
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  setDeleteError(null);
-                                  setDeleteCandidate(batch);
-                                }}
-                                disabled={blocked}
-                                title={blocked ? `Tidak dapat dihapus: masih memiliki ${reason}.` : "Hapus batch"}
-                                aria-label={blocked
-                                  ? `Tidak dapat menghapus ${batch.name}: masih memiliki ${reason}`
-                                  : `Hapus ${batch.name}`}
-                                className="rounded-md p-2 text-red-600 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
-                              >
-                                <Trash2 className="size-4" />
-                              </button>
-                            );
-                          })()}
+                          {canDelete && (
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setDeleteError(null);
+                                setDeleteCandidate(batch);
+                              }}
+                              title="Sembunyikan batch dari data aktif"
+                              aria-label={`Hapus ${batch.name}`}
+                              className="rounded-md p-2 text-red-600 hover:bg-red-50"
+                            >
+                              <Trash2 className="size-4" />
+                            </button>
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -504,10 +491,8 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
             )}
             {deleteCandidate && (
               <DeleteConfirmationDialog
-                title="Hapus batch ini?"
                 recordName={deleteCandidate.name}
-                description="Penghapusan bersifat permanen dan hanya dapat dilakukan jika batch tidak memiliki Enrollment, Class, Schedule, atau Certificate. Data terkait tidak akan dihapus."
-                confirmLabel="Hapus Batch"
+                description="Enrollment, kelas, jadwal, dan sertifikat yang terkait tetap tersimpan."
                 pending={deletePending}
                 error={deleteError}
                 onCancel={() => {

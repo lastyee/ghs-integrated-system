@@ -5,6 +5,7 @@ import { Eye, FileText, Plus, RotateCcw, Search, X, Loader2, AlertCircle, Trash2
 import { useEffect, useMemo, useState } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 export type DocumentStatus = "PENDING" | "VERIFIED" | "REJECTED" | "EXPIRED";
 
@@ -71,6 +72,7 @@ function formatDate(dateString: string | null | undefined): string {
 }
 
 export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
+  const { showToast } = useToast();
   const [documents, setDocuments] = useState<DocumentRecord[]>([]);
   const [students, setStudents] = useState<StudentSummary[]>([]);
   const [loading, setLoading] = useState(true);
@@ -253,7 +255,7 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
       if (!response.ok) {
         throw new Error(payload.message || `Gagal menghapus dokumen (HTTP ${response.status})`);
       }
-      setNotice(`Dokumen "${deleteCandidate.fileName}" berhasil dihapus.`);
+      showToast("success", `Dokumen "${deleteCandidate.fileName}" berhasil disembunyikan dari data aktif.`);
       setDocuments((current) => current.filter((document) => document.id !== deleteCandidate.id));
       setDeleteCandidate(null);
       setRefreshTrigger((value) => value + 1);
@@ -524,16 +526,13 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
                         {canDelete && (
                           <button
                             type="button"
-                            disabled={item.status === "VERIFIED"}
                             onClick={() => {
                               setDeleteCandidate(item);
                               setDeleteError(null);
                             }}
-                            title={item.status === "VERIFIED" ? "Dokumen terverifikasi tidak dapat dihapus." : "Hapus dokumen"}
-                            aria-label={item.status === "VERIFIED"
-                              ? `Dokumen ${item.fileName} terverifikasi tidak dapat dihapus`
-                              : `Hapus dokumen ${item.fileName}`}
-                            className="inline-flex items-center rounded-md p-2 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                            title="Sembunyikan dokumen dari data aktif"
+                            aria-label={`Hapus dokumen ${item.fileName}`}
+                            className="inline-flex items-center rounded-md p-2 text-red-700 hover:bg-red-50"
                           >
                             <Trash2 className="size-4" />
                           </button>
@@ -575,16 +574,13 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
                   {canDelete && (
                     <button
                       type="button"
-                      disabled={item.status === "VERIFIED"}
                       onClick={() => {
                         setDeleteCandidate(item);
                         setDeleteError(null);
                       }}
-                      title={item.status === "VERIFIED" ? "Dokumen terverifikasi tidak dapat dihapus." : "Hapus dokumen"}
-                      aria-label={item.status === "VERIFIED"
-                        ? `Dokumen ${item.fileName} terverifikasi tidak dapat dihapus`
-                        : `Hapus dokumen ${item.fileName}`}
-                      className="mt-3 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                      title="Sembunyikan dokumen dari data aktif"
+                      aria-label={`Hapus dokumen ${item.fileName}`}
+                      className="mt-3 inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-semibold text-red-700 hover:bg-red-50"
                     >
                       <Trash2 className="size-3.5" />
                       Hapus
@@ -652,10 +648,8 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
               )}
               {deleteCandidate && (
                 <DeleteConfirmationDialog
-                  title="Hapus dokumen?"
                   recordName={deleteCandidate.fileName}
-                  description="File dan object storage akan dihapus permanen. Tindakan ini tidak dapat dibatalkan. Hanya dokumen PENDING, REJECTED, atau EXPIRED yang dapat dihapus."
-                  confirmLabel="Hapus Permanen"
+                  description="Object storage tetap aman; pembersihan storage tidak dilakukan."
                   pending={deletePending}
                   error={deleteError}
                   onCancel={() => {

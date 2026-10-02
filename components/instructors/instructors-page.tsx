@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { AlertCircle, Loader2, RotateCcw, Trash2, Users } from "lucide-react";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 type Instructor = {
   id: string;
@@ -15,10 +16,10 @@ type Instructor = {
 };
 
 export function InstructorsPage({ canDelete }: { canDelete: boolean }) {
+  const { showToast } = useToast();
   const [instructors, setInstructors] = useState<Instructor[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
   const [candidate, setCandidate] = useState<Instructor | null>(null);
   const [deleteError, setDeleteError] = useState<string | null>(null);
   const [deletePending, setDeletePending] = useState(false);
@@ -63,7 +64,7 @@ export function InstructorsPage({ canDelete }: { canDelete: boolean }) {
       if (!response.ok) {
         throw new Error(payload.error || `Gagal menghapus instruktur (HTTP ${response.status})`);
       }
-      setNotice(`Instruktur "${candidate.name}" berhasil dihapus.`);
+      showToast("success", `Instruktur "${candidate.name}" berhasil disembunyikan dari data aktif.`);
       setCandidate(null);
       reload();
     } catch (cause) {
@@ -80,12 +81,6 @@ export function InstructorsPage({ canDelete }: { canDelete: boolean }) {
         <h1 className="mt-2 text-2xl font-bold text-[#102f50]">Instruktur</h1>
         <p className="mt-1 text-sm text-slate-500">Data pengampu Class dan Schedule.</p>
       </div>
-
-      {notice && (
-        <div role="status" className="mb-4 rounded-lg border border-emerald-200 bg-emerald-50 px-4 py-3 text-sm text-emerald-800">
-          {notice}
-        </div>
-      )}
 
       {error ? (
         <div className="rounded-xl border border-red-200 bg-red-50 p-6 text-center">
@@ -116,12 +111,6 @@ export function InstructorsPage({ canDelete }: { canDelete: boolean }) {
             </thead>
             <tbody className="divide-y divide-slate-100">
               {instructors.map((instructor) => {
-                const reasons = [
-                  instructor._count.classes > 0 && `${instructor._count.classes} Class`,
-                  instructor._count.schedules > 0 && `${instructor._count.schedules} Schedule`,
-                  instructor.userId !== null && "akun User tertaut",
-                ].filter(Boolean);
-                const blocked = reasons.length > 0;
                 return (
                   <tr key={instructor.id}>
                     <td className="px-5 py-4 font-semibold text-[#102f50]">{instructor.name}</td>
@@ -132,16 +121,13 @@ export function InstructorsPage({ canDelete }: { canDelete: boolean }) {
                       <td className="px-5 py-4 text-right">
                         <button
                           type="button"
-                          disabled={blocked}
                           onClick={() => {
                             setDeleteError(null);
                             setCandidate(instructor);
                           }}
-                          title={blocked ? `Tidak dapat dihapus: masih memiliki ${reasons.join(", ")}.` : "Hapus instruktur"}
-                          aria-label={blocked
-                            ? `Tidak dapat menghapus ${instructor.name}: masih memiliki ${reasons.join(", ")}`
-                            : `Hapus ${instructor.name}`}
-                          className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40"
+                          title="Sembunyikan instruktur dari data aktif"
+                          aria-label={`Hapus ${instructor.name}`}
+                          className="inline-flex items-center gap-2 rounded-md px-3 py-2 text-red-700 hover:bg-red-50"
                         >
                           <Trash2 className="size-4" />
                           Hapus
@@ -166,10 +152,8 @@ export function InstructorsPage({ canDelete }: { canDelete: boolean }) {
 
       {candidate && (
         <DeleteConfirmationDialog
-          title="Hapus instructor ini?"
           recordName={candidate.name}
-          description="Penghapusan bersifat permanen. Hanya instructor tanpa Class, Schedule, atau akun User tertaut yang dapat dihapus. Data lain tidak akan dihapus."
-          confirmLabel="Hapus Instructor"
+          description="Akun pengguna, kelas, dan jadwal yang terkait tetap tersimpan."
           pending={deletePending}
           error={deleteError}
           onCancel={() => {

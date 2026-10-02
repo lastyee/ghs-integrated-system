@@ -24,6 +24,11 @@ export async function GET() {
     await requirePermission("enrollment:read");
 
     const enrollments = await prisma.enrollment.findMany({
+      where: {
+        deletedAt: null,
+        student: { deletedAt: null },
+        batch: { deletedAt: null, program: { deletedAt: null } },
+      },
       select: {
         ...enrollmentSelect,
         student: {
@@ -94,7 +99,7 @@ export async function POST(request: Request) {
     }
 
     const batch = await prisma.batch.findUnique({
-      where: { id: parsed.data.batchId },
+      where: { id: parsed.data.batchId, deletedAt: null, program: { deletedAt: null } },
       select: { id: true },
     });
 

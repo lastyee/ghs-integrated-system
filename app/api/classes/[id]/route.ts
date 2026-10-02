@@ -5,6 +5,7 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import { requireInstructorClassAccess } from "@/lib/instructor-ownership";
 import { classUpdateSchema } from "@/schemas/class";
 
 const prisma = new PrismaClient();
@@ -39,14 +40,20 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    await requirePermission("class:read");
+    const authenticatedUser = await requirePermission("class:read");
     const { id } = await params;
 
-    const classRecord = await prisma.class.findUnique({
-      where: { id },
+    const classRecord = await prisma.class.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        batch: { deletedAt: null, program: { deletedAt: null } },
+        instructor: { deletedAt: null },
+      },
       select: {
         ...classSelect,
         schedules: {
+          where: { deletedAt: null, subject: { deletedAt: null }, instructor: { deletedAt: null } },
           select: {
             id: true,
             date: true,
@@ -70,6 +77,10 @@ export async function GET(
 
     if (!classRecord) {
       return Response.json({ error: "Class not found" }, { status: 404 });
+    }
+
+    if (authenticatedUser.role === "INSTRUCTOR") {
+      await requireInstructorClassAccess(authenticatedUser, id);
     }
 
     return Response.json({ data: classRecord });
@@ -103,8 +114,8 @@ export async function PATCH(
       return Response.json({ error: "Invalid request body" }, { status: 400 });
     }
 
-    const existingClass = await prisma.class.findUnique({
-      where: { id },
+    const existingClass = await prisma.class.findFirst({
+      where: { id, deletedAt: null },
       select: {
         id: true,
         name: true,
@@ -120,7 +131,7 @@ export async function PATCH(
 
     if (parsed.data.batchId !== undefined) {
       const batch = await prisma.batch.findUnique({
-        where: { id: parsed.data.batchId },
+        where: { id: parsed.data.batchId, deletedAt: null, program: { deletedAt: null } },
         select: { id: true },
       });
       if (!batch) {
@@ -130,7 +141,7 @@ export async function PATCH(
 
     if (parsed.data.instructorId !== undefined) {
       const instructor = await prisma.instructor.findUnique({
-        where: { id: parsed.data.instructorId },
+        where: { id: parsed.data.instructorId, deletedAt: null },
         select: { id: true },
       });
       if (!instructor) {
@@ -212,9 +223,53 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { error: "Method Not Allowed" },
-    { status: 405, headers: { Allow: "GET, PATCH" } },
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("class:delete");
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
+      throw new AuthorizationError(403, "Permission denied");
+    }
+
+    const { id } = await params;
+    if (!id.trim()) {
+      return Response.json({ error: "Invalid class ID" }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const classRecord = await transaction.class.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!classRecord) return null;
+
+      const deletedAt = new Date();
+      await transaction.class.update({
+        where: { id: classRecord.id },
+        data: { deletedAt },
+      });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Class",
+        entityId: classRecord.id,
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
+      });
+      return { id: classRecord.id, deletedAt };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!result) {
+      return Response.json({ error: "Class not found" }, { status: 404 });
+    }
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("Failed to soft-delete class", error);
+    return Response.json({ error: "Unable to delete class" }, { status: 500 });
+  }
 }

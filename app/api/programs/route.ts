@@ -23,6 +23,7 @@ export async function GET() {
     await requirePermission("program:read");
 
     const programs = await prisma.program.findMany({
+      where: { deletedAt: null },
       select: programSelect,
       orderBy: [{ name: "asc" }, { id: "asc" }],
     });
@@ -101,4 +102,3 @@ export async function POST(request: Request) {
     return Response.json({ error: "Unable to create program" }, { status: 500 });
   }
 }
-

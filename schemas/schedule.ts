@@ -15,3 +15,10 @@ export const scheduleCreateSchema = z
     topic: z.string().nullable().optional(),
   })
   .strict();
+
+export const scheduleUpdateSchema = scheduleCreateSchema
+  .extend({
+    status: z.enum(["SCHEDULED", "COMPLETED", "CANCELLED"]).optional(),
+  })
+  .partial()
+  .strict();

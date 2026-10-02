@@ -6,7 +6,6 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   Clock3,
-  UserRound,
   ExternalLink,
   Loader2,
   AlertCircle,
@@ -15,10 +14,6 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
-import {
-  studentsAttention,
-  upcomingInterviews,
-} from "@/lib/mock-data";
 import { GraduationCap, CheckCircle2, FileText } from "lucide-react";
 
 // Step 69C: Replaced hardcoded placementPipeline and placementSummaryCards with live /api/applications data
@@ -76,62 +71,79 @@ type LivePlacementItem = {
 
 export function PlacementDashboard() {
   const [applications, setApplications] = useState<LiveApplicationItem[]>([]);
+  const [loadingApplications, setLoadingApplications] = useState(true);
   const [openVacanciesCount, setOpenVacanciesCount] = useState(0);
+  const [loadingVacancies, setLoadingVacancies] = useState(true);
   const [interviews, setInterviews] = useState<LiveInterviewItem[]>([]);
   const [loadingInterviews, setLoadingInterviews] = useState(true);
   const [placements, setPlacements] = useState<LivePlacementItem[]>([]);
   const [loadingPlacements, setLoadingPlacements] = useState(true);
+  const [dashboardError, setDashboardError] = useState<string | null>(null);
 
   useEffect(() => {
     let isMounted = true;
 
     fetch("/api/applications")
       .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted && Array.isArray(data)) {
-            setApplications(data);
-          }
+        if (!res.ok) {
+          throw new Error(`Gagal memuat lamaran (HTTP ${res.status}).`);
         }
+        const data = await res.json();
+        if (!Array.isArray(data)) throw new Error("Format data lamaran tidak valid.");
+        if (isMounted) setApplications(data);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (isMounted) setDashboardError(error instanceof Error ? error.message : "Gagal memuat lamaran.");
+      })
+      .finally(() => {
+        if (isMounted) setLoadingApplications(false);
+      });
 
     fetch("/api/vacancies?status=OPEN")
       .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted && Array.isArray(data)) {
-            setOpenVacanciesCount(data.length);
-          }
+        if (!res.ok) {
+          throw new Error(`Gagal memuat lowongan (HTTP ${res.status}).`);
         }
+        const data = await res.json();
+        if (!Array.isArray(data)) throw new Error("Format data lowongan tidak valid.");
+        if (isMounted) setOpenVacanciesCount(data.length);
       })
-      .catch(() => {});
+      .catch((error: unknown) => {
+        if (isMounted) setDashboardError(error instanceof Error ? error.message : "Gagal memuat lowongan.");
+      })
+      .finally(() => {
+        if (isMounted) setLoadingVacancies(false);
+      });
 
     fetch("/api/interviews")
       .then(async (res) => {
-        if (res.ok) {
-          const data = await res.json();
-          if (isMounted && Array.isArray(data)) {
-            setInterviews(data);
-          }
+        if (!res.ok) {
+          throw new Error(`Gagal memuat wawancara (HTTP ${res.status}).`);
         }
+        const data = await res.json();
+        if (!Array.isArray(data)) throw new Error("Format data wawancara tidak valid.");
+        if (isMounted) setInterviews(data);
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        if (isMounted) setDashboardError(error instanceof Error ? error.message : "Gagal memuat wawancara.");
+      })
       .finally(() => {
         if (isMounted) setLoadingInterviews(false);
       });
 
     fetch("/api/placements")
       .then(async (res) => {
-        if (res.ok) {
-          const json = await res.json();
-          const list = Array.isArray(json) ? json : json.data || [];
-          if (isMounted) {
-            setPlacements(list);
-          }
+        if (!res.ok) {
+          throw new Error(`Gagal memuat placement (HTTP ${res.status}).`);
         }
+        const json = await res.json();
+        const list = Array.isArray(json) ? json : json.data;
+        if (!Array.isArray(list)) throw new Error("Format data placement tidak valid.");
+        if (isMounted) setPlacements(list);
       })
-      .catch(() => {})
+      .catch((error: unknown) => {
+        if (isMounted) setDashboardError(error instanceof Error ? error.message : "Gagal memuat placement.");
+      })
       .finally(() => {
         if (isMounted) setLoadingPlacements(false);
       });
@@ -145,7 +157,7 @@ export function PlacementDashboard() {
     ["APPLIED", "SCREENING", "INTERVIEW"].includes(a.status)
   ).length;
 
-  const upcomingCount = interviews.filter(
+  const pendingInterviewCount = interviews.filter(
     (iv) => iv.status === "PENDING" || iv.status === "RESCHEDULED"
   ).length;
 
@@ -153,30 +165,34 @@ export function PlacementDashboard() {
 
   const dynamicSummaryCards = [
     {
-      label: "Peserta Siap Penempatan",
-      value: "24",
-      description: "Data peserta training",
+      label: "Placement aktif",
+      value: loadingPlacements
+        ? "—"
+        : String(placements.filter((p) =>
+            ["PREPARATION", "READY", "DEPARTED", "PLACED"].includes(p.status),
+          ).length),
+      description: "Jumlah record pada status aktif",
       icon: GraduationCap,
       tone: "navy" as const,
     },
     {
       label: "Lowongan Aktif",
-      value: String(openVacanciesCount),
+      value: loadingVacancies ? "—" : String(openVacanciesCount),
       description: "Lowongan status OPEN",
       icon: BriefcaseBusiness,
       tone: "red" as const,
     },
     {
       label: "Lamaran Aktif",
-      value: String(activeAppsCount),
+      value: loadingApplications ? "—" : String(activeAppsCount),
       description: "Lamaran status aktif",
       icon: FileText,
       tone: "yellow" as const,
     },
     {
-      label: "Wawancara Mendatang",
-      value: String(upcomingCount),
-      description: "Agenda wawancara aktif",
+      label: "Wawancara pending/rescheduled",
+      value: String(pendingInterviewCount),
+      description: "Jumlah wawancara pada status tersebut",
       icon: CalendarDays,
       tone: "blue" as const,
     },
@@ -197,6 +213,12 @@ export function PlacementDashboard() {
         </p>
       </div>
 
+      {dashboardError && (
+        <p role="alert" className="mb-4 rounded-md border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {dashboardError}
+        </p>
+      )}
+
       <section
         aria-label="Ringkasan penempatan"
         className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5"
@@ -210,9 +232,8 @@ export function PlacementDashboard() {
         <PipelineSection applications={applications} />
       </div>
 
-      <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
+      <div className="mt-6">
         <InterviewsSection interviews={interviews} loading={loadingInterviews} />
-        <AttentionSection />
       </div>
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
         <VacanciesSection />
@@ -322,9 +343,6 @@ function InterviewsSection({
   interviews: LiveInterviewItem[];
   loading: boolean;
 }) {
-  // Preserve upcomingInterviews keyword for backward regression assertion compatibility
-  void upcomingInterviews;
-
   return (
     <section className="rounded-lg border border-[#EEEEEE] bg-white" id="section-live-interviews">
       <div className="flex items-center justify-between border-b border-[#EEEEEE] px-5 py-4">
@@ -584,23 +602,6 @@ function VacanciesSection() {
   );
 }
 
-function AttentionSection() {
-  return (
-    <section className="rounded-lg border border-[#EEEEEE] bg-white">
-      <SectionHeading title="Peserta yang Memerlukan Perhatian" subtitle="Catatan tindak lanjut berdasarkan mock data" />
-      <div className="divide-y divide-[#EEEEEE]">
-        {studentsAttention.map((item) => (
-          <div key={`${item.name}-${item.issue}`} className="flex items-start gap-3 px-5 py-3.5">
-            <UserRound className="mt-0.5 size-4 shrink-0 text-[#BF120E]" />
-            <div className="min-w-0 flex-1"><p className="text-sm font-semibold text-[#1B1B1B]">{item.name}</p><p className="mt-0.5 text-xs text-slate-500">{item.issue}</p></div>
-            <AttentionBadge status={item.status} />
-          </div>
-        ))}
-      </div>
-    </section>
-  );
-}
-
 function PlacementStatusSection({
   placements,
   loading,
@@ -696,9 +697,4 @@ function InterviewBadge({ status }: { status: string }) {
   };
   const item = config[status] || { label: status, class: "bg-slate-100 text-slate-700" };
   return <span className={`w-fit rounded-md px-2 py-0.5 text-xs font-medium ${item.class}`}>{item.label}</span>;
-}
-
-function AttentionBadge({ status }: { status: string }) {
-  const classes = status === "Selesai" ? "bg-emerald-50 text-emerald-700" : status === "Menunggu" ? "bg-blue-50 text-blue-700" : "bg-amber-50 text-amber-700";
-  return <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs font-medium ${classes}`}>{status}</span>;
 }

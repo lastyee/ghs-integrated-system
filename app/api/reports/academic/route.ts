@@ -27,16 +27,49 @@ export async function GET() {
       scoreStats,
     ] = await Promise.all([
       prisma.student.count({ where: { deletedAt: null } }),
-      prisma.batch.count(),
-      prisma.program.count(),
-      prisma.class.count(),
+      prisma.batch.count({ where: { deletedAt: null, program: { deletedAt: null } } }),
+      prisma.program.count({ where: { deletedAt: null } }),
+      prisma.class.count({
+        where: {
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+        },
+      }),
       prisma.attendance.groupBy({
         by: ["status"],
         _count: { status: true },
+        where: {
+          deletedAt: null,
+          student: { deletedAt: null },
+          schedule: {
+            deletedAt: null,
+            subject: { deletedAt: null },
+            instructor: { deletedAt: null },
+            class: {
+              deletedAt: null,
+              batch: { deletedAt: null, program: { deletedAt: null } },
+              instructor: { deletedAt: null },
+            },
+          },
+        },
       }),
       prisma.assessmentScore.aggregate({
         _avg: { score: true },
         _count: { id: true },
+        where: {
+          deletedAt: null,
+          student: { deletedAt: null },
+          assessment: {
+            deletedAt: null,
+            subject: { deletedAt: null },
+            class: {
+              deletedAt: null,
+              batch: { deletedAt: null, program: { deletedAt: null } },
+              instructor: { deletedAt: null },
+            },
+          },
+        },
       }),
     ]);
 

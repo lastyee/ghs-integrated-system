@@ -5,6 +5,7 @@ import Link from "next/link";
 import { BookOpen, Edit3, Eye, Loader2, Plus, RotateCcw, Search, Trash2, X, AlertCircle } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 interface SubjectData {
   id: string;
@@ -32,6 +33,7 @@ interface SubjectsPageProps {
 }
 
 export function SubjectsPage({ userRole }: SubjectsPageProps) {
+  const { showToast } = useToast();
   const canMutate =
     userRole === "SUPER_ADMIN" ||
     userRole === "ADMIN" ||
@@ -99,7 +101,7 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
       if (!response.ok) {
         throw new Error(payload.error || payload.message || `Gagal menghapus mata pelajaran (HTTP ${response.status})`);
       }
-      setNotice(`Mata pelajaran "${deleteCandidate.name}" berhasil dihapus.`);
+      showToast("success", `Mata pelajaran "${deleteCandidate.name}" berhasil disembunyikan dari data aktif.`);
       setDeleteCandidate(null);
       reloadSubjects();
     } catch (err) {
@@ -417,10 +419,8 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
             )}
             {deleteCandidate && (
               <DeleteConfirmationDialog
-                title="Hapus Mata Pelajaran?"
                 recordName={deleteCandidate.name}
-                description="Mata pelajaran akan dihapus permanen hanya jika tidak terkait ProgramSubject, Schedule, atau Assessment. Data terkait tidak akan dihapus."
-                confirmLabel="Hapus Mata Pelajaran"
+                description="Relasi program, jadwal, dan penilaian yang terkait tetap tersimpan."
                 pending={deletePending}
                 error={deleteError}
                 onCancel={() => {

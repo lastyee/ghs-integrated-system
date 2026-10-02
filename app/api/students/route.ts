@@ -6,6 +6,7 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import { requireLinkedInstructor } from "@/lib/instructor-ownership";
 import { studentCreateSchema } from "@/schemas/student";
 
 const prisma = new PrismaClient();
@@ -13,6 +14,28 @@ const prisma = new PrismaClient();
 export async function GET() {
   try {
     const authenticatedUser = await requirePermission("student:read");
+    const where =
+      authenticatedUser.role === "STUDENT"
+        ? { userId: authenticatedUser.id, deletedAt: null }
+        : authenticatedUser.role === "INSTRUCTOR"
+          ? {
+              deletedAt: null,
+              enrollments: {
+                some: {
+                  deletedAt: null,
+                  batch: {
+                    deletedAt: null,
+                    classes: {
+                      some: {
+                        deletedAt: null,
+                        instructorId: (await requireLinkedInstructor(authenticatedUser)).id,
+                      },
+                    },
+                  },
+                },
+              },
+            }
+          : { deletedAt: null };
 
     const studentSelect = {
       id: true,
@@ -21,15 +44,13 @@ export async function GET() {
       name: true,
       phone: true,
       address: true,
+      status: true,
       createdAt: true,
       updatedAt: true,
     } as const;
 
     const students = await prisma.student.findMany({
-      where:
-        authenticatedUser.role === "STUDENT"
-          ? { userId: authenticatedUser.id }
-          : undefined,
+      where,
       select: {
         ...studentSelect,
       },
@@ -86,6 +107,7 @@ export async function POST(request: Request) {
           name: true,
           phone: true,
           address: true,
+          status: true,
           createdAt: true,
           updatedAt: true,
         },

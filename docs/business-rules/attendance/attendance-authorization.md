@@ -34,21 +34,22 @@ permission menghasilkan `403`, mengikuti existing authorization helper.
 
 | Role | `attendance:read` | `attendance:create` | `attendance:update` | `attendance:delete` |
 |---|---:|---:|---:|---:|
-| SUPER_ADMIN | YES | YES | YES | NO |
-| ADMIN | YES | YES | YES | NO |
+| SUPER_ADMIN | YES | YES | YES | YES |
+| ADMIN | YES | YES | YES | YES |
 | ACADEMIC_STAFF | YES | NO | NO | NO |
 | INSTRUCTOR | YES | YES | YES | NO |
 | MANAGEMENT | YES | NO | NO | NO |
 | STUDENT | YES | NO | NO | NO |
 | PLACEMENT_STAFF | NO | NO | NO | NO |
 
-Status: **CONFIRMED**.
+Status: **UPDATED FOR PHASE 2 IMPLEMENTATION**.
 
-Mapping aktual pada `prisma/seed.js` cocok dengan baseline ini. Tidak ada
-perubahan permission diperlukan pada Step 61.
+Phase 2 explicitly authorizes soft-delete for Attendance to SUPER_ADMIN and
+ADMIN only. This is a user-approved implementation change from the earlier
+Step 61 baseline; it does not authorize hard deletion or cascade changes.
 
-`attendance:delete` tidak didefinisikan. Jangan menambahkan permission atau
-DELETE route.
+Other roles do not receive `attendance:delete`. The route must enforce this
+permission server-side and keep the attendance record and all relations.
 
 ## 3. Ownership Matrix
 
@@ -224,8 +225,9 @@ Tidak ada PATCH Attendance pada Step 61.
 
 ### DELETE
 
-Tidak tersedia `attendance:delete`. Jangan membuat DELETE endpoint,
-delete helper, atau permission baru.
+Phase 2 user authorization supersedes this Step 61 baseline: soft-delete
+is allowed for SUPER_ADMIN and ADMIN only. The existing DELETE endpoint
+must retain all linked records and audit the timestamp transactionally.
 
 ## 11. Business Rules Still TBD
 

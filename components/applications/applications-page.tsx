@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 import {
   APPLICATION_STATUS_BADGES,
   APPLICATION_STATUS_LABELS,
@@ -79,6 +80,7 @@ export function ApplicationStatusBadge({
 }
 
 export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
+  const canDelete = ["SUPER_ADMIN", "ADMIN"].includes(userRole.toUpperCase());
   const isStudent =
     userRole.toUpperCase() === "STUDENT" || userRole.toLowerCase() === "student";
   const isManagement =
@@ -681,6 +683,15 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
                             >
                               Tarik Lamaran
                             </button>
+                          )}
+                          {canDelete && (
+                            <SoftDeleteAction
+                              endpoint={`/api/applications/${app.id}`}
+                              recordName="Lamaran"
+                              identifier={`${app.student.name} / ${app.vacancy.title}`}
+                              description="Lamaran akan disembunyikan dari data aktif. Riwayat seleksi dan relasi penempatan tetap tersimpan."
+                              onDeleted={() => setRefreshTrigger((prev) => prev + 1)}
+                            />
                           )}
 
                           {/* Staff: Fast status transitions if not Management */}

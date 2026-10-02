@@ -6,6 +6,10 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import {
+  requireInstructorClassAccess,
+  requireLinkedInstructor,
+} from "@/lib/instructor-ownership";
 import { scoreCreateSchema } from "@/schemas/assessment";
 
 const prisma = new PrismaClient();
@@ -35,9 +39,18 @@ export async function GET(
     const { id } = await props.params;
     const authenticatedUser = await requirePermission("assessment:read");
 
-    const assessment = await prisma.assessment.findUnique({
-      where: { id },
-      select: { id: true },
+    const assessment = await prisma.assessment.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        class: {
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+        },
+        subject: { deletedAt: null },
+      },
+      select: { id: true, classId: true },
     });
 
     if (!assessment) {
@@ -46,12 +59,17 @@ export async function GET(
         { status: 404 }
       );
     }
+    if (authenticatedUser.role === "INSTRUCTOR") {
+      await requireInstructorClassAccess(authenticatedUser, assessment.classId);
+    }
 
     const { searchParams } = new URL(request.url);
     const queryStudentId = searchParams.get("studentId");
 
     const where: Prisma.AssessmentScoreWhereInput = {
       assessmentId: id,
+      deletedAt: null,
+      student: { deletedAt: null },
     };
 
     if (authenticatedUser.role === "STUDENT") {
@@ -73,6 +91,14 @@ export async function GET(
       if (queryStudentId) {
         where.studentId = queryStudentId;
       }
+    }
+
+    if (authenticatedUser.role === "INSTRUCTOR") {
+      const instructor = await requireLinkedInstructor(authenticatedUser);
+      where.assessment = {
+        deletedAt: null,
+        class: { instructorId: instructor.id, deletedAt: null },
+      };
     }
 
     const scores = await prisma.assessmentScore.findMany({
@@ -105,14 +131,28 @@ export async function POST(
     const { id } = await props.params;
     const authenticatedUser = await requirePermission("assessment:update");
 
-    if (authenticatedUser.role !== "SUPER_ADMIN" && authenticatedUser.role !== "ADMIN") {
+    if (
+      authenticatedUser.role !== "SUPER_ADMIN" &&
+      authenticatedUser.role !== "ADMIN" &&
+      authenticatedUser.role !== "INSTRUCTOR"
+    ) {
       throw new ForbiddenError();
     }
 
-    const assessment = await prisma.assessment.findUnique({
-      where: { id },
+    const assessment = await prisma.assessment.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        class: {
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+        },
+        subject: { deletedAt: null },
+      },
       select: {
         id: true,
+        classId: true,
         maxScore: true,
         class: {
           select: {
@@ -127,6 +167,9 @@ export async function POST(
         { message: "Assessment not found." },
         { status: 404 }
       );
+    }
+    if (authenticatedUser.role === "INSTRUCTOR") {
+      await requireInstructorClassAccess(authenticatedUser, assessment.classId);
     }
 
     // Step 66C: Per GHS policy, score entry is NOT locked when assessment status is COMPLETED
@@ -186,6 +229,7 @@ export async function POST(
       where: {
         studentId,
         batchId: assessment.class.batchId,
+        deletedAt: null,
       },
       select: { id: true },
     });

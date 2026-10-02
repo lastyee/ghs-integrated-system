@@ -6,6 +6,10 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import {
+  requireInstructorScheduleAccess,
+  requireLinkedInstructor,
+} from "@/lib/instructor-ownership";
 import { attendanceCreateSchema } from "@/schemas/attendance";
 
 const prisma = new PrismaClient();
@@ -71,7 +75,20 @@ export async function GET(request: Request) {
     const queryStatus = searchParams.get("status");
     const queryAbsenceType = searchParams.get("absenceType");
 
-    const where: Prisma.AttendanceWhereInput = {};
+    const where: Prisma.AttendanceWhereInput = {
+      deletedAt: null,
+      student: { deletedAt: null },
+      schedule: {
+        deletedAt: null,
+        class: {
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+        },
+        subject: { deletedAt: null },
+        instructor: { deletedAt: null },
+      },
+    };
 
     if (authenticatedUser.role === "STUDENT") {
       const student = await prisma.student.findFirst({
@@ -88,6 +105,22 @@ export async function GET(request: Request) {
       }
 
       where.studentId = student.id;
+    } else if (authenticatedUser.role === "INSTRUCTOR") {
+      const instructor = await requireLinkedInstructor(authenticatedUser);
+      if (queryScheduleId) {
+        await requireInstructorScheduleAccess(authenticatedUser, queryScheduleId);
+      }
+      where.schedule = {
+        deletedAt: null,
+        instructorId: instructor.id,
+        class: {
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+        },
+        subject: { deletedAt: null },
+        instructor: { deletedAt: null },
+      };
     } else {
       if (queryStudentId) {
         where.studentId = queryStudentId;
@@ -131,7 +164,11 @@ export async function POST(request: Request) {
   try {
     const authenticatedUser = await requirePermission("attendance:create");
 
-    if (authenticatedUser.role !== "SUPER_ADMIN" && authenticatedUser.role !== "ADMIN") {
+    if (
+      authenticatedUser.role !== "SUPER_ADMIN" &&
+      authenticatedUser.role !== "ADMIN" &&
+      authenticatedUser.role !== "INSTRUCTOR"
+    ) {
       throw new ForbiddenError();
     }
 
@@ -151,9 +188,16 @@ export async function POST(request: Request) {
     }
 
     const schedule = await prisma.schedule.findUnique({
-      where: { id: parsed.data.scheduleId },
+      where: {
+        id: parsed.data.scheduleId,
+        deletedAt: null,
+        class: { deletedAt: null, batch: { deletedAt: null, program: { deletedAt: null } } },
+        subject: { deletedAt: null },
+        instructor: { deletedAt: null },
+      },
       select: {
         id: true,
+        instructorId: true,
         class: {
           select: {
             batchId: true,
@@ -163,6 +207,13 @@ export async function POST(request: Request) {
     });
     if (!schedule) {
       return Response.json({ error: "Schedule not found" }, { status: 404 });
+    }
+    if (
+      authenticatedUser.role === "INSTRUCTOR" &&
+      schedule.instructorId !==
+        (await requireLinkedInstructor(authenticatedUser)).id
+    ) {
+      throw new ForbiddenError();
     }
 
     const student = await prisma.student.findUnique({
@@ -177,6 +228,7 @@ export async function POST(request: Request) {
       where: {
         studentId: parsed.data.studentId,
         batchId: schedule.class.batchId,
+        deletedAt: null,
       },
       select: { id: true },
     });
@@ -255,7 +307,7 @@ export async function POST(request: Request) {
 
 export async function DELETE() {
   return Response.json(
-    { message: "Method Not Allowed. Attendance records are immutable." },
+    { message: "Method Not Allowed. Attendance deletion requires an individual record ID." },
     { status: 405, headers: { Allow: "GET, POST" } },
   );
 }

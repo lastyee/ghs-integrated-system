@@ -6,6 +6,7 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import { requireInstructorClassAccess } from "@/lib/instructor-ownership";
 import { assessmentUpdateSchema } from "@/schemas/assessment";
 import { assessmentSelect } from "@/app/api/assessments/route";
 
@@ -36,8 +37,17 @@ export async function GET(
     const { id } = await props.params;
     const authenticatedUser = await requirePermission("assessment:read");
 
-    const assessment = await prisma.assessment.findUnique({
-      where: { id },
+    const assessment = await prisma.assessment.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        class: {
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+        },
+        subject: { deletedAt: null },
+      },
       select: assessmentSelect,
     });
 
@@ -46,6 +56,9 @@ export async function GET(
         { message: "Assessment not found." },
         { status: 404 }
       );
+    }
+    if (authenticatedUser.role === "INSTRUCTOR") {
+      await requireInstructorClassAccess(authenticatedUser, assessment.classId);
     }
 
     let scores;
@@ -63,12 +76,13 @@ export async function GET(
         where: {
           assessmentId: id,
           studentId: student.id,
+          deletedAt: null,
         },
         select: scoreIncludeSelect,
       });
     } else {
       scores = await prisma.assessmentScore.findMany({
-        where: { assessmentId: id },
+        where: { assessmentId: id, deletedAt: null, student: { deletedAt: null } },
         select: scoreIncludeSelect,
         orderBy: {
           student: {
@@ -108,8 +122,8 @@ export async function PATCH(
       throw new ForbiddenError();
     }
 
-    const existing = await prisma.assessment.findUnique({
-      where: { id },
+    const existing = await prisma.assessment.findFirst({
+      where: { id, deletedAt: null },
     });
 
     if (!existing) {
@@ -157,7 +171,7 @@ export async function PATCH(
 
     if (data.subjectId) {
       const subjectRecord = await prisma.subject.findUnique({
-        where: { id: data.subjectId },
+        where: { id: data.subjectId, deletedAt: null },
         select: { id: true },
       });
       if (!subjectRecord) {
@@ -172,7 +186,7 @@ export async function PATCH(
     // maxScore cannot be lowered below any existing student score for this assessment.
     if (data.maxScore !== undefined) {
       const maxScoreAggregate = await prisma.assessmentScore.aggregate({
-        where: { assessmentId: id },
+        where: { assessmentId: id, deletedAt: null, student: { deletedAt: null } },
         _max: { score: true },
       });
       const highestScore = maxScoreAggregate._max.score;
@@ -255,7 +269,7 @@ export async function DELETE(
 ) {
   try {
     const authenticatedUser = await requirePermission("assessment:delete");
-    if (!["SUPER_ADMIN", "ADMIN", "ACADEMIC_STAFF"].includes(authenticatedUser.role)) {
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
       throw new ForbiddenError();
     }
 
@@ -266,45 +280,28 @@ export async function DELETE(
 
     const result = await prisma.$transaction(
       async (transaction) => {
-        const assessment = await transaction.assessment.findUnique({
-          where: { id },
-          select: {
-            id: true,
-            name: true,
-            classId: true,
-            subjectId: true,
-            status: true,
-            _count: { select: { scores: true } },
-          },
+        const assessment = await transaction.assessment.findFirst({
+          where: { id, deletedAt: null },
+          select: { id: true },
         });
 
         if (!assessment) {
           return { status: "not-found" as const };
         }
 
-        if (assessment.status !== "OPEN" || assessment._count.scores > 0) {
-          return {
-            status: "blocked" as const,
-            assessmentStatus: assessment.status,
-            scoreCount: assessment._count.scores,
-          };
-        }
-
-        await transaction.assessment.delete({ where: { id } });
+        const deletedAt = new Date();
+        await transaction.assessment.update({
+          where: { id: assessment.id },
+          data: { deletedAt },
+        });
         await createAuditLog(transaction, authenticatedUser, {
-          action: "ASSESSMENT_DELETE",
+          action: "DELETE",
           entity: "Assessment",
-          entityId: id,
-          changes: {
-            name: assessment.name,
-            classId: assessment.classId,
-            subjectId: assessment.subjectId,
-            status: assessment.status,
-            scoreCount: assessment._count.scores,
-          },
+          entityId: assessment.id,
+          changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
         });
 
-        return { status: "deleted" as const };
+        return { status: "deleted" as const, id: assessment.id, deletedAt };
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
@@ -312,21 +309,9 @@ export async function DELETE(
     if (result.status === "not-found") {
       return Response.json({ message: "Assessment not found." }, { status: 404 });
     }
-    if (result.status === "blocked") {
-      const message = result.assessmentStatus === "COMPLETED"
-        ? "Completed assessments cannot be deleted."
-        : `Assessment has ${result.scoreCount} score record(s) and cannot be deleted.`;
-      return Response.json(
-        {
-          message,
-          status: result.assessmentStatus,
-          scoreCount: result.scoreCount,
-        },
-        { status: 409 },
-      );
-    }
-
-    return Response.json({ success: true }, { status: 200 });
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);
@@ -335,9 +320,9 @@ export async function DELETE(
       if (error.code === "P2025") {
         return Response.json({ message: "Assessment not found." }, { status: 404 });
       }
-      if (error.code === "P2003" || error.code === "P2034") {
+      if (error.code === "P2034") {
         return Response.json(
-          { message: "Assessment has changed or gained dependent score records and cannot be deleted." },
+          { message: "Assessment changed during deletion. Please retry." },
           { status: 409 },
         );
       }

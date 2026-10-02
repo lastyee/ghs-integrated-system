@@ -6,7 +6,9 @@ import {
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
 import { requireStudentOwnership } from "@/lib/student-ownership";
+import { requireInstructorStudentAccess } from "@/lib/instructor-ownership";
 import { studentUpdateSchema } from "@/schemas/student";
+import { studentProfileUpdateSchema } from "@/schemas/profile";
 
 const prisma = new PrismaClient();
 
@@ -20,10 +22,12 @@ export async function GET(
 
     if (authenticatedUser.role === "STUDENT") {
       await requireStudentOwnership(id);
+    } else if (authenticatedUser.role === "INSTRUCTOR") {
+      await requireInstructorStudentAccess(authenticatedUser, id);
     }
 
-    const student = await prisma.student.findUnique({
-      where: { id },
+    const student = await prisma.student.findFirst({
+      where: { id, deletedAt: null },
       select: {
         id: true,
         nim: true,
@@ -31,9 +35,14 @@ export async function GET(
         name: true,
         phone: true,
         address: true,
+        status: true,
         createdAt: true,
         updatedAt: true,
         enrollments: {
+          where: {
+            deletedAt: null,
+            batch: { deletedAt: null, program: { deletedAt: null } },
+          },
           select: {
             id: true,
             status: true,
@@ -94,37 +103,45 @@ export async function PATCH(
       return Response.json({ error: "Invalid request body" }, { status: 400 });
     }
 
-    const parsed = studentUpdateSchema.safeParse(body);
-
-    if (!parsed.success) {
-      return Response.json({ error: "Invalid request body" }, { status: 400 });
-    }
-
-    const data: Prisma.StudentUpdateInput = {};
-
-    if (parsed.data.nim !== undefined) {
-      data.nim = parsed.data.nim;
-    }
-
-    if (parsed.data.nik !== undefined) {
-      data.nik = parsed.data.nik;
-    }
-
-    if (parsed.data.name !== undefined) {
-      data.name = parsed.data.name;
-    }
-
-    if (parsed.data.phone !== undefined) {
-      data.phone = parsed.data.phone;
-    }
-
-    if (parsed.data.address !== undefined) {
-      data.address = parsed.data.address;
+    let data: Prisma.StudentUpdateInput;
+    if (authenticatedUser.role === "STUDENT") {
+      const parsed = studentProfileUpdateSchema.safeParse(body);
+      if (!parsed.success) {
+        return Response.json(
+          {
+            error: "Invalid request body",
+            details: parsed.error.flatten().fieldErrors,
+          },
+          { status: 400 },
+        );
+      }
+      data = {
+        phone: parsed.data.phone,
+        address: parsed.data.address,
+      };
+    } else {
+      const parsed = studentUpdateSchema.safeParse(body);
+      if (!parsed.success) {
+        return Response.json(
+          {
+            error: "Invalid request body",
+            details: parsed.error.flatten().fieldErrors,
+          },
+          { status: 400 },
+        );
+      }
+      data = {
+        nim: parsed.data.nim,
+        nik: parsed.data.nik,
+        name: parsed.data.name,
+        phone: parsed.data.phone,
+        address: parsed.data.address,
+      };
     }
 
     const student = await prisma.$transaction(async (transaction) => {
-      const previousStudent = await transaction.student.findUnique({
-        where: { id },
+      const previousStudent = await transaction.student.findFirst({
+        where: { id, deletedAt: null },
         select: {
           nim: true,
           nik: true,
@@ -148,6 +165,7 @@ export async function PATCH(
           name: true,
           phone: true,
           address: true,
+          status: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -210,10 +228,58 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { error: "Method Not Allowed" },
-    { status: 405, headers: { Allow: "GET, PATCH" } },
-  );
-}
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("student:delete");
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
+      throw new AuthorizationError(403, "Permission denied");
+    }
 
+    const { id } = await params;
+    if (!id.trim()) {
+      return Response.json({ error: "Invalid student ID" }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const student = await transaction.student.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+
+      if (!student) return null;
+
+      const deletedAt = new Date();
+      const updated = await transaction.student.update({
+        where: { id: student.id },
+        data: { deletedAt },
+        select: { id: true },
+      });
+
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Student",
+        entityId: updated.id,
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
+      });
+
+      return { id: updated.id, deletedAt };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!result) {
+      return Response.json({ error: "Student not found" }, { status: 404 });
+    }
+
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("Failed to soft-delete student", error);
+    return Response.json({ error: "Unable to delete student" }, { status: 500 });
+  }
+}

@@ -5,6 +5,7 @@ import { AlertCircle, Eye, FileCheck2, MoreHorizontal, Plus, RotateCcw, Search, 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 import { AssessmentType, AssessmentSessionStatus } from "@prisma/client";
 
 export interface ApiAssessment {
@@ -85,6 +86,7 @@ const statuses: AssessmentSessionStatus[] = [
 ];
 
 export function AssessmentsPage({ canDelete = false }: { canDelete?: boolean }) {
+  const { showToast } = useToast();
   const [assessments, setAssessments] = useState<ApiAssessment[]>([]);
   const [classes, setClasses] = useState<ApiClass[]>([]);
   const [subjects, setSubjects] = useState<ApiSubject[]>([]);
@@ -286,7 +288,7 @@ export function AssessmentsPage({ canDelete = false }: { canDelete?: boolean }) 
       }
 
       setDeleteCandidate(null);
-      setNotice("Assessment berhasil dihapus permanen.");
+      showToast("success", "Assessment berhasil disembunyikan dari data aktif.");
       await fetchData();
     } catch (err: unknown) {
       setDeleteError(err instanceof Error ? err.message : "Gagal menghapus assessment.");
@@ -526,10 +528,8 @@ export function AssessmentsPage({ canDelete = false }: { canDelete?: boolean }) 
       )}
       {deleteCandidate && (
         <DeleteConfirmationDialog
-          title="Hapus assessment ini?"
           recordName={deleteCandidate.name}
-          description="Assessment ini masih berstatus OPEN dan belum memiliki nilai. Data assessment akan dihapus permanen."
-          confirmLabel="Hapus Permanen"
+          description="Assessment dan seluruh nilai historisnya akan tetap tersimpan."
           pending={deletePending}
           error={deleteError}
           onCancel={() => {
@@ -683,13 +683,6 @@ function Actions({
   canDelete: boolean;
   onDelete: (item: ApiAssessment) => void;
 }) {
-  const scoreCount = item._count?.scores ?? 0;
-  const blockedReason = item.status === AssessmentSessionStatus.COMPLETED
-    ? "Assessment COMPLETED tidak dapat dihapus."
-    : scoreCount > 0
-      ? `Assessment memiliki ${scoreCount} nilai.`
-      : null;
-
   return (
     <div className="flex items-center gap-1">
       <Link
@@ -727,19 +720,12 @@ function Actions({
               <>
                 <button
                   type="button"
-                  disabled={Boolean(blockedReason)}
-                  title={blockedReason ?? undefined}
                   onClick={() => onDelete(item)}
-                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left font-medium text-red-700 hover:bg-red-50 disabled:cursor-not-allowed disabled:text-slate-400 disabled:hover:bg-white"
+                  className="flex w-full items-center gap-2 rounded-md px-3 py-2 text-left font-medium text-red-700 hover:bg-red-50"
                 >
                   <Trash2 className="size-3.5" />
                   Hapus
                 </button>
-                {blockedReason && (
-                  <p className="px-3 pb-2 text-[10px] leading-4 text-slate-500">
-                    {blockedReason}
-                  </p>
-                )}
               </>
             )}
           </div>

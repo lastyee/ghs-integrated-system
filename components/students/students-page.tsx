@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { AlertCircle, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 export type StudentItem = {
   id: string;
@@ -11,6 +12,7 @@ export type StudentItem = {
   name: string;
   phone: string | null;
   address: string | null;
+  status: "ACTIVE" | "GRADUATED" | "DROPPED";
   createdAt: string;
   updatedAt: string;
 };
@@ -47,6 +49,7 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
 
   const canCreate = ["SUPER_ADMIN", "ADMIN", "ACADEMIC_STAFF"].includes(userRole);
   const canEdit = ["SUPER_ADMIN", "ADMIN", "ACADEMIC_STAFF", "STUDENT"].includes(userRole);
+  const canDelete = ["SUPER_ADMIN", "ADMIN"].includes(userRole);
 
   useEffect(() => {
     let isMounted = true;
@@ -278,6 +281,7 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
                     <th className="px-5 py-3 font-semibold">NIK</th>
                     <th className="px-5 py-3 font-semibold">No. Telepon</th>
                     <th className="px-5 py-3 font-semibold">Alamat</th>
+                    <th className="px-5 py-3 font-semibold">Status</th>
                     <th className="px-5 py-3 font-semibold">Terdaftar Pada</th>
                     <th className="px-5 py-3 font-semibold">Action</th>
                   </tr>
@@ -290,6 +294,19 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
                       <td className="px-5 py-4 text-slate-600">{student.nik || "-"}</td>
                       <td className="px-5 py-4 text-slate-600">{student.phone || "-"}</td>
                       <td className="px-5 py-4 text-slate-600">{student.address || "-"}</td>
+                      <td className="px-5 py-4">
+                        <span
+                          className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                            student.status === "ACTIVE"
+                              ? "bg-emerald-50 text-emerald-700"
+                              : student.status === "GRADUATED"
+                              ? "bg-blue-50 text-blue-700"
+                              : "bg-red-50 text-red-700"
+                          }`}
+                        >
+                          {student.status === "ACTIVE" ? "Aktif" : student.status === "GRADUATED" ? "Lulus" : "Tidak Lanjut"}
+                        </span>
+                      </td>
                       <td className="px-5 py-4 text-slate-600">
                         {new Date(student.createdAt).toLocaleDateString("id-ID", {
                           day: "numeric",
@@ -316,6 +333,15 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
                               <Edit3 className="size-4" />
                             </button>
                           )}
+                          {canDelete && (
+                            <SoftDeleteAction
+                              endpoint={`/api/students/${student.id}`}
+                              recordName="Peserta"
+                              identifier={`${student.name} / ${student.nim}`}
+                              description="Profil peserta akan disembunyikan. Riwayat akademik dan relasi tetap tersimpan."
+                              onDeleted={reloadStudents}
+                            />
+                          )}
                         </div>
                       </td>
                     </tr>
@@ -332,6 +358,17 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
                       <p className="font-semibold text-[#102f50]">{student.name}</p>
                       <p className="mt-1 text-xs text-[#123b63]">{student.nim}</p>
                     </div>
+                    <span
+                      className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-semibold ${
+                        student.status === "ACTIVE"
+                          ? "bg-emerald-50 text-emerald-700"
+                          : student.status === "GRADUATED"
+                          ? "bg-blue-50 text-blue-700"
+                          : "bg-red-50 text-red-700"
+                      }`}
+                    >
+                      {student.status === "ACTIVE" ? "Aktif" : student.status === "GRADUATED" ? "Lulus" : "Tidak Lanjut"}
+                    </span>
                   </div>
                   <dl className="mt-3 grid gap-1 text-xs text-slate-500">
                     <div>
@@ -358,6 +395,15 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
                       >
                         Edit
                       </button>
+                    )}
+                    {canDelete && (
+                      <SoftDeleteAction
+                        endpoint={`/api/students/${student.id}`}
+                        recordName="Peserta"
+                        identifier={`${student.name} / ${student.nim}`}
+                        description="Profil peserta akan disembunyikan. Riwayat akademik dan relasi tetap tersimpan."
+                        onDeleted={reloadStudents}
+                      />
                     )}
                   </div>
                 </article>

@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { Edit3, Eye, Loader2, Plus, RotateCcw, Search, X, AlertCircle, BookOpen } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
+import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 type ClassStatus = "SCHEDULED" | "COMPLETED" | "CANCELLED";
 
@@ -63,6 +64,7 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
     userRole === "SUPER_ADMIN" ||
     userRole === "ADMIN" ||
     userRole === "ACADEMIC_STAFF";
+  const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
 
   const [classes, setClasses] = useState<ClassData[]>([]);
   const [batches, setBatches] = useState<BatchItem[]>([]);
@@ -459,6 +461,15 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
                             >
                               <Edit3 className="size-4" />
                             </button>
+                          )}
+                          {canDelete && (
+                            <SoftDeleteAction
+                              endpoint={`/api/classes/${item.id}`}
+                              recordName="Kelas"
+                              identifier={`${item.name} / ${item.batch?.name || item.batchId}`}
+                              description="Kelas akan disembunyikan dari data aktif. Jadwal, kehadiran, dan riwayat terkait tetap tersimpan."
+                              onDeleted={reloadClasses}
+                            />
                           )}
                         </div>
                       </td>

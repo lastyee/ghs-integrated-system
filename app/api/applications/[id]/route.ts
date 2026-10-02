@@ -1,4 +1,4 @@
-import { PrismaClient } from "@prisma/client";
+import { Prisma, PrismaClient } from "@prisma/client";
 import {
   AuthorizationError,
   authorizationErrorResponse,
@@ -21,8 +21,13 @@ export async function GET(
     const authenticatedUser = await requirePermission("application:read");
     const { id } = await params;
 
-    const application = await prisma.application.findUnique({
-      where: { id },
+    const application = await prisma.application.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        student: { deletedAt: null },
+        vacancy: { deletedAt: null, employer: { deletedAt: null } },
+      },
       select: applicationDetailSelect,
     });
 
@@ -87,8 +92,13 @@ export async function PATCH(
 
     const data = parsed.data;
 
-    const existing = await prisma.application.findUnique({
-      where: { id },
+    const existing = await prisma.application.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        student: { deletedAt: null },
+        vacancy: { deletedAt: null, employer: { deletedAt: null } },
+      },
       select: {
         id: true,
         studentId: true,
@@ -209,9 +219,53 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { message: "Method Not Allowed. Application deletion is not permitted." },
-    { status: 405, headers: { Allow: "GET, PATCH" } }
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("application:delete");
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
+      throw new AuthorizationError(403, "Permission denied");
+    }
+
+    const { id } = await params;
+    if (!id.trim()) {
+      return Response.json({ message: "Invalid application ID." }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const application = await transaction.application.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!application) return null;
+
+      const deletedAt = new Date();
+      await transaction.application.update({
+        where: { id: application.id },
+        data: { deletedAt },
+      });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Application",
+        entityId: application.id,
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
+      });
+      return { id: application.id, deletedAt };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!result) {
+      return Response.json({ message: "Application not found." }, { status: 404 });
+    }
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("Failed to soft-delete application", error);
+    return Response.json({ message: "Unable to delete application." }, { status: 500 });
+  }
 }

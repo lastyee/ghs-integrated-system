@@ -268,11 +268,6 @@ async function runTests({ batchId, user }, beforeCounts) {
 }
 
 async function cleanup() {
-  if (created.auditLogIds.length > 0) {
-    await prisma.auditLog.deleteMany({
-      where: { id: { in: created.auditLogIds } },
-    });
-  }
   if (created.enrollmentIds.length > 0) {
     await prisma.enrollment.deleteMany({
       where: { id: { in: created.enrollmentIds } },

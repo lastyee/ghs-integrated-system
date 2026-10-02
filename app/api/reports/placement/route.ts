@@ -28,17 +28,68 @@ export async function GET() {
       prisma.application.groupBy({
         by: ["status"],
         _count: { status: true },
+        where: {
+          deletedAt: null,
+          student: { deletedAt: null },
+          vacancy: {
+            is: {
+              deletedAt: null,
+              employer: { is: { deletedAt: null } },
+            },
+          },
+        },
       }),
       prisma.interview.groupBy({
         by: ["status"],
         _count: { status: true },
+        where: {
+          deletedAt: null,
+          application: {
+            deletedAt: null,
+            student: { deletedAt: null },
+            vacancy: {
+              is: {
+                deletedAt: null,
+                employer: { is: { deletedAt: null } },
+              },
+            },
+          },
+        },
       }),
       prisma.placement.groupBy({
         by: ["status"],
         _count: { status: true },
+        where: {
+          deletedAt: null,
+          student: { deletedAt: null },
+          employer: { deletedAt: null },
+          OR: [
+            { vacancyId: null },
+            { vacancy: { is: { deletedAt: null, employer: { is: { deletedAt: null } } } } },
+          ],
+          AND: [
+            {
+              OR: [
+                { applicationId: null },
+                {
+                  application: {
+                    deletedAt: null,
+                    student: { deletedAt: null },
+                    vacancy: {
+                      is: {
+                        deletedAt: null,
+                        employer: { is: { deletedAt: null } },
+                      },
+                    },
+                  },
+                },
+              ],
+            },
+          ],
+        },
       }),
-      prisma.vacancy.count(),
-      prisma.employer.count(),
+      prisma.vacancy.count({ where: { deletedAt: null, employer: { deletedAt: null } } }),
+      prisma.employer.count({ where: { deletedAt: null } }),
     ]);
 
     const applicationFunnel = {

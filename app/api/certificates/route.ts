@@ -58,12 +58,18 @@ export async function GET(request: Request) {
       return Response.json({ error: "Invalid query parameters" }, { status: 400 });
     }
 
-    const where: Prisma.CertificateWhereInput = {};
+    const where: Prisma.CertificateWhereInput = {
+      deletedAt: null,
+      student: { deletedAt: null },
+      program: { deletedAt: null },
+      batch: { deletedAt: null },
+    };
 
     if (authenticatedUser.role === "STUDENT") {
       // Strictly scoped to own student record; ignore client-provided studentId query param
       where.student = {
         userId: authenticatedUser.id,
+        deletedAt: null,
       };
     } else {
       if (parsedQuery.data.studentId) {
@@ -113,8 +119,8 @@ export async function POST(request: Request) {
     }
 
     // Validate Student exists
-    const student = await prisma.student.findUnique({
-      where: { id: parsed.data.studentId },
+    const student = await prisma.student.findFirst({
+      where: { id: parsed.data.studentId, deletedAt: null },
       select: { id: true },
     });
     if (!student) {
@@ -123,7 +129,7 @@ export async function POST(request: Request) {
 
     // Validate Program exists
     const program = await prisma.program.findUnique({
-      where: { id: parsed.data.programId },
+      where: { id: parsed.data.programId, deletedAt: null },
       select: { id: true },
     });
     if (!program) {
@@ -132,7 +138,7 @@ export async function POST(request: Request) {
 
     // Validate Batch exists
     const batch = await prisma.batch.findUnique({
-      where: { id: parsed.data.batchId },
+      where: { id: parsed.data.batchId, deletedAt: null, program: { deletedAt: null } },
       select: { id: true },
     });
     if (!batch) {
@@ -200,4 +206,3 @@ export async function DELETE() {
     { status: 405, headers: { Allow: "GET, POST" } },
   );
 }
-

@@ -36,8 +36,8 @@ export async function GET(
     await requirePermission("vacancy:read");
     const { id } = await params;
 
-    const vacancy = await prisma.vacancy.findUnique({
-      where: { id },
+    const vacancy = await prisma.vacancy.findFirst({
+      where: { id, deletedAt: null, employer: { is: { deletedAt: null } } },
       select: vacancyDetailSelect,
     });
 
@@ -107,8 +107,8 @@ export async function PATCH(
       authenticatedUser = await requirePermission("vacancy:update");
     }
 
-    const existing = await prisma.vacancy.findUnique({
-      where: { id },
+    const existing = await prisma.vacancy.findFirst({
+      where: { id, deletedAt: null, employer: { is: { deletedAt: null } } },
       select: {
         id: true,
         employerId: true,
@@ -129,7 +129,7 @@ export async function PATCH(
     // If changing employerId, verify target employer exists
     if (data.employerId && data.employerId !== existing.employerId) {
       const targetEmployer = await prisma.employer.findUnique({
-        where: { id: data.employerId },
+        where: { id: data.employerId, deletedAt: null },
         select: { id: true },
       });
 
@@ -201,47 +201,34 @@ export async function DELETE(
     const { id } = await params;
 
     const result = await prisma.$transaction(async (transaction) => {
-      const vacancy = await transaction.vacancy.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          title: true,
-          _count: { select: { applications: true, placements: true } },
-        },
+      const vacancy = await transaction.vacancy.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
       });
 
       if (!vacancy) return { kind: "not-found" as const };
 
-      const dependencies = vacancy._count;
-      if (dependencies.applications > 0 || dependencies.placements > 0) {
-        return { kind: "blocked" as const, vacancy, dependencies };
-      }
-
-      await transaction.vacancy.delete({ where: { id } });
+      const deletedAt = new Date();
+      await transaction.vacancy.update({
+        where: { id: vacancy.id },
+        data: { deletedAt },
+      });
       await createAuditLog(transaction, authenticatedUser, {
         action: "DELETE",
         entity: "Vacancy",
         entityId: vacancy.id,
-        changes: { deleted: { title: vacancy.title }, dependencies },
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
       });
 
-      return { kind: "deleted" as const, id: vacancy.id, title: vacancy.title };
+      return { kind: "deleted" as const, id: vacancy.id, deletedAt };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     if (result.kind === "not-found") {
       return Response.json({ message: "Vacancy not found." }, { status: 404 });
     }
-    if (result.kind === "blocked") {
-      return Response.json(
-        {
-          message: `Vacancy "${result.vacancy.title}" cannot be deleted because it still has dependent records.`,
-          dependencies: result.dependencies,
-        },
-        { status: 409 },
-      );
-    }
-
-    return Response.json({ data: result }, { status: 200 });
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);
@@ -250,17 +237,9 @@ export async function DELETE(
       if (error.code === "P2025") {
         return Response.json({ message: "Vacancy not found." }, { status: 404 });
       }
-      if (error.code === "P2003" || error.code === "P2034") {
-        const { id } = await params;
-        const [applications, placements] = await Promise.all([
-          prisma.application.count({ where: { vacancyId: id } }),
-          prisma.placement.count({ where: { vacancyId: id } }),
-        ]);
+      if (error.code === "P2034") {
         return Response.json(
-          {
-            message: "Vacancy cannot be deleted because dependent records changed during the request.",
-            dependencies: { applications, placements },
-          },
+          { message: "Vacancy changed during deletion. Please retry." },
           { status: 409 },
         );
       }

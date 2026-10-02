@@ -46,12 +46,6 @@ export default function LoginPage() {
     }
   }
 
-  function fillDemo(demoEmail: string, demoPass: string) {
-    setEmail(demoEmail);
-    setPassword(demoPass);
-    setError("");
-  }
-
   return (
     <main className="flex min-h-screen items-center justify-center bg-[#F3F3F3] p-4 sm:p-6 lg:p-8">
       <div className="flex w-full max-w-5xl overflow-hidden rounded-xl border border-[#EEEEEE] bg-white shadow-lg">
@@ -80,21 +74,8 @@ export default function LoginPage() {
               Selamat Datang
             </p>
             <h2 className="text-2xl font-bold leading-tight sm:text-3xl text-white drop-shadow-sm">
-              Global Hospitality School
+              Global Hospitality Sukabumi
             </h2>
-            <p className="text-xs sm:text-sm text-slate-200 leading-relaxed drop-shadow-xs">
-              Mewujudkan tenaga profesional berstandar internasional di industri perhotelan dan kapal pesiar melalui kurikulum terstruktur dan penempatan kerja nyata.
-            </p>
-            <div className="pt-2 flex items-center gap-4 text-xs text-slate-300 drop-shadow-xs">
-              <span className="flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-[#FFD618]"></span>
-                60% Praktek / 40% Teori
-              </span>
-              <span className="flex items-center gap-1.5">
-                <span className="size-2 rounded-full bg-[#BF120E]"></span>
-                Sertifikasi Resmi
-              </span>
-            </div>
           </div>
         </div>
 
@@ -194,32 +175,6 @@ export default function LoginPage() {
             </Link>
           </div>
 
-          {/* Quick Demo Shortcuts (Development & Testing only; excluded from production bundles) */}
-          {process.env.NODE_ENV !== "production" && (
-            <div className="mt-5 rounded-lg border border-[#EEEEEE] bg-[#F8F8F8] p-3 text-left">
-              <p className="mb-2 text-[11px] font-semibold text-slate-500">
-                Akses Cepat Pengujian (Mode Pengembangan)
-              </p>
-              <div className="flex flex-col gap-1.5">
-                <button
-                  type="button"
-                  onClick={() => fillDemo("admin.demo@ghs.local", "superadmin123")}
-                  className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 transition hover:bg-slate-50"
-                >
-                  <span>👤 <strong>Super Admin</strong> (admin.demo@ghs.local)</span>
-                  <span className="font-semibold text-[#BF120E]">Pilih</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => fillDemo("student.demo@ghs.local", "murid123")}
-                  className="flex items-center justify-between rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs text-slate-700 transition hover:bg-slate-50"
-                >
-                  <span>🎓 <strong>Student Demo</strong> (student.demo@ghs.local)</span>
-                  <span className="font-semibold text-[#BF120E]">Pilih</span>
-                </button>
-              </div>
-            </div>
-          )}
         </div>
       </div>
     </main>

@@ -6,6 +6,7 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import { requireInstructorScheduleAccess } from "@/lib/instructor-ownership";
 import { attendanceUpdateSchema } from "@/schemas/attendance";
 import { attendanceSelect } from "../route";
 
@@ -19,8 +20,22 @@ export async function GET(
     const authenticatedUser = await requirePermission("attendance:read");
     const { id } = await params;
 
-    const attendance = await prisma.attendance.findUnique({
-      where: { id },
+    const attendance = await prisma.attendance.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        student: { deletedAt: null },
+        schedule: {
+          deletedAt: null,
+          subject: { deletedAt: null },
+          instructor: { deletedAt: null },
+          class: {
+            deletedAt: null,
+            batch: { deletedAt: null, program: { deletedAt: null } },
+            instructor: { deletedAt: null },
+          },
+        },
+      },
       select: attendanceSelect,
     });
 
@@ -32,6 +47,8 @@ export async function GET(
       if (attendance.student.userId !== authenticatedUser.id) {
         throw new ForbiddenError();
       }
+    } else if (authenticatedUser.role === "INSTRUCTOR") {
+      await requireInstructorScheduleAccess(authenticatedUser, attendance.scheduleId);
     }
 
     return Response.json({ data: attendance });
@@ -52,7 +69,11 @@ export async function PATCH(
   try {
     const authenticatedUser = await requirePermission("attendance:update");
 
-    if (authenticatedUser.role !== "SUPER_ADMIN" && authenticatedUser.role !== "ADMIN") {
+    if (
+      authenticatedUser.role !== "SUPER_ADMIN" &&
+      authenticatedUser.role !== "ADMIN" &&
+      authenticatedUser.role !== "INSTRUCTOR"
+    ) {
       throw new ForbiddenError();
     }
 
@@ -73,10 +94,21 @@ export async function PATCH(
       );
     }
 
-    const existingAttendance = await prisma.attendance.findUnique({
-      where: { id },
+    const existingAttendance = await prisma.attendance.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        student: { deletedAt: null },
+        schedule: {
+          deletedAt: null,
+          class: { deletedAt: null, batch: { deletedAt: null, program: { deletedAt: null } } },
+          subject: { deletedAt: null },
+          instructor: { deletedAt: null },
+        },
+      },
       select: {
         id: true,
+        scheduleId: true,
         status: true,
         absenceType: true,
         lateMinutes: true,
@@ -86,6 +118,9 @@ export async function PATCH(
 
     if (!existingAttendance) {
       return Response.json({ error: "Attendance not found" }, { status: 404 });
+    }
+    if (authenticatedUser.role === "INSTRUCTOR") {
+      await requireInstructorScheduleAccess(authenticatedUser, existingAttendance.scheduleId);
     }
 
     const updateData: Prisma.AttendanceUpdateInput = {};
@@ -134,9 +169,53 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { message: "Method Not Allowed. Attendance records are immutable." },
-    { status: 405, headers: { Allow: "GET, PATCH" } },
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("attendance:delete");
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
+      throw new ForbiddenError();
+    }
+
+    const { id } = await params;
+    if (!id.trim()) {
+      return Response.json({ error: "Invalid attendance ID" }, { status: 400 });
+    }
+
+    const result = await prisma.$transaction(async (transaction) => {
+      const attendance = await transaction.attendance.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
+      });
+      if (!attendance) return null;
+
+      const deletedAt = new Date();
+      await transaction.attendance.update({
+        where: { id: attendance.id },
+        data: { deletedAt },
+      });
+      await createAuditLog(transaction, authenticatedUser, {
+        action: "DELETE",
+        entity: "Attendance",
+        entityId: attendance.id,
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
+      });
+      return { id: attendance.id, deletedAt };
+    }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
+
+    if (!result) {
+      return Response.json({ error: "Attendance not found" }, { status: 404 });
+    }
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+    console.error("Failed to soft-delete attendance", error);
+    return Response.json({ error: "Unable to delete attendance" }, { status: 500 });
+  }
 }

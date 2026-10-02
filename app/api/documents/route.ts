@@ -80,7 +80,10 @@ export async function GET(request: Request) {
     const queryStatus = searchParams.get("status");
     const queryType = searchParams.get("type");
 
-    const where: Prisma.DocumentWhereInput = {};
+    const where: Prisma.DocumentWhereInput = {
+      deletedAt: null,
+      student: { deletedAt: null },
+    };
 
     if (authenticatedUser.role === "STUDENT") {
       const student = await prisma.student.findFirst({

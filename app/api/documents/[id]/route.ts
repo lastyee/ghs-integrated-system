@@ -23,8 +23,8 @@ export async function GET(
     const authenticatedUser = await requirePermission("document:read");
     const { id } = await params;
 
-    const document = await prisma.document.findUnique({
-      where: { id },
+    const document = await prisma.document.findFirst({
+      where: { id, deletedAt: null, student: { deletedAt: null } },
       select: documentSelect,
     });
 
@@ -91,8 +91,8 @@ export async function PATCH(
       );
     }
 
-    const existingDocument = await prisma.document.findUnique({
-      where: { id },
+    const existingDocument = await prisma.document.findFirst({
+      where: { id, deletedAt: null },
       select: {
         id: true,
         status: true,
@@ -168,17 +168,12 @@ export async function PATCH(
 }
 
 export async function DELETE(
-  request: Request,
+  _request: Request,
   { params }: { params: Promise<{ id: string }> },
 ) {
-  const failureState: {
-    stage: "database" | "storage";
-    storageCleanupCompleted: boolean;
-  } = { stage: "database", storageCleanupCompleted: false };
-
   try {
     const authenticatedUser = await requirePermission("document:delete");
-    if (!["SUPER_ADMIN", "ADMIN", "ACADEMIC_STAFF", "PLACEMENT_STAFF"].includes(authenticatedUser.role)) {
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
       throw new ForbiddenError();
     }
 
@@ -189,73 +184,37 @@ export async function DELETE(
 
     const result = await prisma.$transaction(async (tx) => {
       const lockedRows = await tx.$queryRaw<Array<{ id: string }>>`
-        SELECT "id" FROM "documents" WHERE "id" = ${id} FOR UPDATE
+        SELECT "id" FROM "documents" WHERE "id" = ${id} AND "deletedAt" IS NULL FOR UPDATE
       `;
       if (lockedRows.length === 0) return { kind: "not-found" as const };
 
-      const document = await tx.document.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          studentId: true,
-          status: true,
-          fileName: true,
-          storagePath: true,
-        },
+      const document = await tx.document.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
       });
       if (!document) return { kind: "not-found" as const };
-      if (document.status === DocumentStatus.VERIFIED) {
-        return { kind: "verified" as const };
-      }
 
-      failureState.stage = "storage";
-      if (
-        process.env.NODE_ENV !== "production" &&
-        request.headers.get("x-test-force-storage-failure") === "true"
-      ) {
-        throw new Error("Simulated storage cleanup failure.");
-      }
-      const storageResult = await getStorageProvider().delete({
-        bucket: DOCUMENTS_BUCKET,
-        path: document.storagePath,
+      const deletedAt = new Date();
+      await tx.document.update({
+        where: { id: document.id },
+        data: { deletedAt },
       });
-      failureState.storageCleanupCompleted = true;
-
-      failureState.stage = "database";
-      if (
-        process.env.NODE_ENV !== "production" &&
-        request.headers.get("x-test-force-db-failure") === "true"
-      ) {
-        throw new Error("Simulated database deletion failure.");
-      }
-
-      await tx.document.delete({ where: { id: document.id } });
       await createAuditLog(tx, authenticatedUser, {
-        action: "DOCUMENT_DELETE",
+        action: "DELETE",
         entity: "Document",
         entityId: document.id,
-        changes: {
-          status: document.status,
-          fileName: document.fileName,
-          storagePath: document.storagePath,
-          storageOutcome: storageResult.outcome,
-          studentId: document.studentId,
-        },
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
       });
 
-      return { kind: "deleted" as const };
+      return { kind: "deleted" as const, id: document.id, deletedAt };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     if (result.kind === "not-found") {
       return Response.json({ message: "Document not found." }, { status: 404 });
     }
-    if (result.kind === "verified") {
-      return Response.json(
-        { message: "Verified documents cannot be deleted." },
-        { status: 409 },
-      );
-    }
-    return Response.json({ success: true }, { status: 200 });
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);
@@ -265,23 +224,7 @@ export async function DELETE(
       return Response.json({ message: "Document not found." }, { status: 404 });
     }
 
-    if (failureState.stage === "storage") {
-      console.error("DELETE /api/documents/[id]: storage cleanup failed.");
-      return Response.json(
-        { message: "Storage cleanup failed. The document record was retained; retry deletion." },
-        { status: 502 },
-      );
-    }
-
-    if (failureState.storageCleanupCompleted) {
-      console.error("DELETE /api/documents/[id]: database deletion did not complete after storage cleanup.");
-      return Response.json(
-        { message: "Document deletion did not complete. Its file may already be absent; retry using the same document ID." },
-        { status: 503 },
-      );
-    }
-
-    console.error("DELETE /api/documents/[id]: unexpected database error.");
+    console.error("DELETE /api/documents/[id] failed:", error);
     return Response.json(
       { message: "Unable to delete document." },
       { status: 500 },

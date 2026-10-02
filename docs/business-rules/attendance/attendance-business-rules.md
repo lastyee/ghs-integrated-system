@@ -500,19 +500,19 @@ dan diselaraskan dengan implementasi AuditLog.
 
 # 14. Authorization
 
-## 14.1 Attendance Permission Matrix
+## 14.1 Attendance Permission Matrix (Phase 2 Update)
 
 | Role | Read | Create | Update | Delete |
 |---|---:|---:|---:|---:|
-| Super Admin | YES | YES | YES | NO |
-| Admin | YES | YES | YES | NO |
+| Super Admin | YES | YES | YES | YES |
+| Admin | YES | YES | YES | YES |
 | Academic Staff | YES | NO | NO | NO |
 | Instructor | YES | YES | YES | NO |
 | Management | YES | NO | NO | NO |
 | Student | YES | NO | NO | NO |
 | Placement Staff | NO | NO | NO | NO |
 
-Status: CONFIRMED
+Status: Updated by the Phase 2 user authorization for soft-delete only.
 
 Permission tersebut merupakan technical authorization baseline.
 
@@ -562,15 +562,11 @@ Student tidak memiliki permission untuk menghapus Attendance.
 
 ## 16.1 Attendance Delete
 
-Status: CONFIRMED secara authorization
+Status: SUPERSEDED by the Phase 2 user authorization.
 
-Tidak terdapat permission `attendance:delete`.
-
-Business policy mengenai penghapusan record Attendance juga belum
-ditetapkan.
-
-Untuk menjaga historical record, penghapusan tidak boleh diasumsikan
-sebagai mekanisme koreksi.
+Attendance soft-delete is authorized for Super Admin and Admin only.
+The record and all related history must remain in the database; deletion
+must not be treated as a correction workflow.
 
 ---
 

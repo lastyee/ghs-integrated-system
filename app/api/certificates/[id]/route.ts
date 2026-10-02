@@ -19,8 +19,14 @@ export async function GET(
     const authenticatedUser = await requirePermission("certificate:read");
     const { id } = await params;
 
-    const certificate = await prisma.certificate.findUnique({
-      where: { id },
+    const certificate = await prisma.certificate.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        student: { deletedAt: null },
+        program: { deletedAt: null },
+        batch: { deletedAt: null },
+      },
       select: certificateSelect,
     });
 
@@ -71,8 +77,14 @@ export async function PATCH(
       return Response.json({ error: "Invalid request body" }, { status: 400 });
     }
 
-    const existing = await prisma.certificate.findUnique({
-      where: { id },
+    const existing = await prisma.certificate.findFirst({
+      where: {
+        id,
+        deletedAt: null,
+        student: { deletedAt: null },
+        program: { deletedAt: null },
+        batch: { deletedAt: null },
+      },
       select: certificateSelect,
     });
 
@@ -130,9 +142,63 @@ export async function PATCH(
   }
 }
 
-export async function DELETE() {
-  return Response.json(
-    { error: "Method Not Allowed" },
-    { status: 405, headers: { Allow: "GET, PATCH" } },
-  );
+export async function DELETE(
+  _request: Request,
+  { params }: { params: Promise<{ id: string }> },
+) {
+  try {
+    const authenticatedUser = await requirePermission("certificate:delete");
+    const { id } = await params;
+
+    const deleted = await prisma.$transaction(async (tx) => {
+      const active = await tx.certificate.findFirst({
+        where: {
+          id,
+          deletedAt: null,
+          student: { deletedAt: null },
+          program: { deletedAt: null },
+          batch: { deletedAt: null },
+        },
+        select: { id: true, status: true },
+      });
+
+      if (!active) return null;
+
+      const deletedAt = new Date();
+      const result = await tx.certificate.updateMany({
+        where: { id, deletedAt: null },
+        data: { deletedAt },
+      });
+      if (result.count !== 1) return null;
+
+      await createAuditLog(tx, authenticatedUser, {
+        action: "DELETE",
+        entity: "Certificate",
+        entityId: active.id,
+        changes: {
+          fields: {
+            deletedAt: {
+              before: null,
+              after: deletedAt.toISOString(),
+            },
+          },
+        },
+      });
+
+      return { id: active.id, status: active.status, deletedAt };
+    });
+
+    if (!deleted) {
+      return Response.json({ error: "Certificate not found" }, { status: 404 });
+    }
+
+    return Response.json({ data: deleted }, { status: 200 });
+  } catch (error) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
+
+    console.error("Failed to soft delete certificate", error);
+    return Response.json({ error: "Unable to delete certificate" }, { status: 500 });
+  }
 }

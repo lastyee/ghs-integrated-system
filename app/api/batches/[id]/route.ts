@@ -19,9 +19,16 @@ const batchSelect = {
   updatedAt: true,
   _count: {
     select: {
-      enrollments: true,
-      classes: true,
-      certificates: true,
+      enrollments: {
+        where: { deletedAt: null, student: { deletedAt: null } },
+      },
+      classes: {
+        where: {
+          deletedAt: null,
+          instructor: { deletedAt: null },
+        },
+      },
+      certificates: { where: { status: "ACTIVE" } },
     },
   },
   program: {
@@ -41,11 +48,12 @@ export async function GET(
     await requirePermission("batch:read");
     const { id } = await params;
 
-    const batch = await prisma.batch.findUnique({
-      where: { id },
+    const batch = await prisma.batch.findFirst({
+      where: { id, deletedAt: null, program: { deletedAt: null } },
       select: {
         ...batchSelect,
         enrollments: {
+          where: { deletedAt: null, student: { deletedAt: null } },
           select: {
             id: true,
             studentId: true,
@@ -101,8 +109,8 @@ export async function PATCH(
       return Response.json({ error: "Invalid request body" }, { status: 400 });
     }
 
-    const existingBatch = await prisma.batch.findUnique({
-      where: { id },
+    const existingBatch = await prisma.batch.findFirst({
+      where: { id, deletedAt: null, program: { deletedAt: null } },
       select: {
         id: true,
         name: true,
@@ -118,7 +126,7 @@ export async function PATCH(
 
     if (parsed.data.programId !== undefined) {
       const program = await prisma.program.findUnique({
-        where: { id: parsed.data.programId },
+        where: { id: parsed.data.programId, deletedAt: null },
         select: { id: true },
       });
       if (!program) {
@@ -230,7 +238,7 @@ export async function DELETE(
 ) {
   try {
     const authenticatedUser = await requirePermission("batch:delete");
-    if (!["SUPER_ADMIN", "ADMIN", "ACADEMIC_STAFF"].includes(authenticatedUser.role)) {
+    if (!["SUPER_ADMIN", "ADMIN"].includes(authenticatedUser.role)) {
       throw new AuthorizationError(403, "Permission denied");
     }
 
@@ -240,70 +248,34 @@ export async function DELETE(
     }
 
     const result = await prisma.$transaction(async (transaction) => {
-      const batch = await transaction.batch.findUnique({
-        where: { id },
-        select: {
-          id: true,
-          name: true,
-          _count: {
-            select: {
-              enrollments: true,
-              classes: true,
-              certificates: true,
-            },
-          },
-        },
+      const batch = await transaction.batch.findFirst({
+        where: { id, deletedAt: null },
+        select: { id: true },
       });
 
       if (!batch) return { kind: "not-found" as const };
 
-      const scheduleCount = await transaction.schedule.count({
-        where: { class: { batchId: id } },
+      const deletedAt = new Date();
+      await transaction.batch.update({
+        where: { id: batch.id },
+        data: { deletedAt },
       });
-      const dependencies = {
-        enrollments: batch._count.enrollments,
-        classes: batch._count.classes,
-        schedules: scheduleCount,
-        certificates: batch._count.certificates,
-      };
-
-      if (
-        dependencies.enrollments > 0 ||
-        dependencies.classes > 0 ||
-        dependencies.schedules > 0 ||
-        dependencies.certificates > 0
-      ) {
-        return { kind: "blocked" as const, batch, dependencies };
-      }
-
-      await transaction.batch.delete({ where: { id } });
       await createAuditLog(transaction, authenticatedUser, {
-        action: "BATCH_DELETE",
+        action: "DELETE",
         entity: "Batch",
         entityId: batch.id,
-        changes: {
-          deleted: { name: batch.name },
-          dependencies,
-        },
+        changes: { deletedAt: { before: null, after: deletedAt.toISOString() } },
       });
 
-      return { kind: "deleted" as const };
+      return { kind: "deleted" as const, id: batch.id, deletedAt };
     }, { isolationLevel: Prisma.TransactionIsolationLevel.Serializable });
 
     if (result.kind === "not-found") {
       return Response.json({ error: "Batch not found" }, { status: 404 });
     }
-    if (result.kind === "blocked") {
-      return Response.json(
-        {
-          error: "Batch cannot be deleted because it has dependent Enrollment, Class, Schedule, or Certificate records.",
-          dependencies: result.dependencies,
-        },
-        { status: 409 },
-      );
-    }
-
-    return Response.json({ success: true }, { status: 200 });
+    return Response.json({
+      data: { id: result.id, deletedAt: result.deletedAt.toISOString() },
+    }, { status: 200 });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

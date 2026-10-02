@@ -6,6 +6,10 @@ import {
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
+import {
+  requireInstructorClassAccess,
+  requireLinkedInstructor,
+} from "@/lib/instructor-ownership";
 import { assessmentCreateSchema } from "@/schemas/assessment";
 
 const prisma = new PrismaClient();
@@ -44,7 +48,7 @@ export const assessmentSelect = {
 
 export async function GET(request: Request) {
   try {
-    await requirePermission("assessment:read");
+    const authenticatedUser = await requirePermission("assessment:read");
     const { searchParams } = new URL(request.url);
 
     const queryClassId = searchParams.get("classId");
@@ -52,7 +56,29 @@ export async function GET(request: Request) {
     const queryType = searchParams.get("type");
     const queryStatus = searchParams.get("status");
 
-    const where: Prisma.AssessmentWhereInput = {};
+    const where: Prisma.AssessmentWhereInput = {
+      deletedAt: null,
+      class: {
+        deletedAt: null,
+        batch: { deletedAt: null, program: { deletedAt: null } },
+        instructor: { deletedAt: null },
+      },
+      subject: { deletedAt: null },
+    };
+    if (authenticatedUser.role === "INSTRUCTOR") {
+      const instructor = await requireLinkedInstructor(authenticatedUser);
+      where.class = {
+        is: {
+          deletedAt: null,
+          batch: { deletedAt: null, program: { deletedAt: null } },
+          instructor: { deletedAt: null },
+          instructorId: instructor.id,
+        },
+      };
+      if (queryClassId) {
+        await requireInstructorClassAccess(authenticatedUser, queryClassId);
+      }
+    }
 
     if (queryClassId) {
       where.classId = queryClassId;
@@ -76,7 +102,9 @@ export async function GET(request: Request) {
         ...assessmentSelect,
         _count: {
           select: {
-            scores: true,
+            scores: {
+              where: { deletedAt: null, student: { deletedAt: null } },
+            },
           },
         },
       },
@@ -101,7 +129,11 @@ export async function POST(request: Request) {
   try {
     const authenticatedUser = await requirePermission("assessment:create");
 
-    if (authenticatedUser.role !== "SUPER_ADMIN" && authenticatedUser.role !== "ADMIN") {
+    if (
+      authenticatedUser.role !== "SUPER_ADMIN" &&
+      authenticatedUser.role !== "ADMIN" &&
+      authenticatedUser.role !== "INSTRUCTOR"
+    ) {
       throw new ForbiddenError();
     }
 
@@ -130,8 +162,13 @@ export async function POST(request: Request) {
 
     // Validate Class exists
     const classRecord = await prisma.class.findUnique({
-      where: { id: classId },
-      select: { id: true },
+      where: {
+        id: classId,
+        deletedAt: null,
+        batch: { deletedAt: null, program: { deletedAt: null } },
+        instructor: { deletedAt: null },
+      },
+      select: { id: true, instructorId: true },
     });
     if (!classRecord) {
       return Response.json(
@@ -139,10 +176,27 @@ export async function POST(request: Request) {
         { status: 404 }
       );
     }
+    if (authenticatedUser.role === "INSTRUCTOR") {
+      const instructor = await requireLinkedInstructor(authenticatedUser);
+      if (classRecord.instructorId !== instructor.id) {
+        throw new ForbiddenError();
+      }
+      const scheduledSubject = await prisma.schedule.findFirst({
+        where: {
+          classId,
+          subjectId,
+          instructorId: instructor.id,
+        },
+        select: { id: true },
+      });
+      if (!scheduledSubject) {
+        throw new ForbiddenError();
+      }
+    }
 
     // Validate Subject exists
     const subjectRecord = await prisma.subject.findUnique({
-      where: { id: subjectId },
+      where: { id: subjectId, deletedAt: null },
       select: { id: true },
     });
     if (!subjectRecord) {

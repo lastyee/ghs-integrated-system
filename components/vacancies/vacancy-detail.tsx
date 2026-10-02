@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
+import { useToast } from "@/components/common/toast-provider";
 
 export type VacancyDetailData = {
   id: string;
@@ -45,6 +46,7 @@ type EditVacancyFormValues = {
 };
 
 export function VacancyDetail({ vacancyId, userRole = "" }: { vacancyId: string; userRole?: string }) {
+  const { showToast } = useToast();
   const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
   const [vacancy, setVacancy] = useState<VacancyDetailData | null>(null);
   const [loading, setLoading] = useState(true);
@@ -122,6 +124,7 @@ export function VacancyDetail({ vacancyId, userRole = "" }: { vacancyId: string;
         throw new Error(payload.message || payload.error || `Gagal menghapus lowongan (HTTP ${response.status})`);
       }
       setDeletedTitle(vacancy.title);
+      showToast("success", `Lowongan "${vacancy.title}" berhasil disembunyikan dari data aktif.`);
       setVacancy(null);
       setDeleteDialogOpen(false);
     } catch (err) {
@@ -550,10 +553,8 @@ export function VacancyDetail({ vacancyId, userRole = "" }: { vacancyId: string;
               )}
               {canDelete && deleteDialogOpen && (
                 <DeleteConfirmationDialog
-                  title="Hapus Vacancy?"
                   recordName={vacancy.title}
-                  description="Vacancy akan dihapus permanen hanya jika tidak memiliki Application atau Placement. Data terkait tidak akan dihapus."
-                  confirmLabel="Hapus Vacancy"
+                  description="Lamaran dan penempatan yang terkait tetap tersimpan."
                   pending={deletePending}
                   error={deleteError}
                   onCancel={() => {
