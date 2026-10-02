@@ -3,6 +3,7 @@ import {
   AuthorizationError,
   authorizationErrorResponse,
   ForbiddenError,
+  requireAuthenticatedUser,
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
@@ -67,7 +68,11 @@ export const attendanceSelect = {
 
 export async function GET(request: Request) {
   try {
-    const authenticatedUser = await requirePermission("attendance:read");
+    const sessionUser = await requireAuthenticatedUser();
+    const authenticatedUser =
+      sessionUser.role === "STUDENT"
+        ? sessionUser
+        : await requirePermission("attendance:read");
     const { searchParams } = new URL(request.url);
 
     const queryScheduleId = searchParams.get("scheduleId");
@@ -92,7 +97,7 @@ export async function GET(request: Request) {
 
     if (authenticatedUser.role === "STUDENT") {
       const student = await prisma.student.findFirst({
-        where: { userId: authenticatedUser.id },
+        where: { userId: authenticatedUser.id, deletedAt: null },
         select: { id: true },
       });
 

@@ -3,6 +3,7 @@ import {
   AuthorizationError,
   authorizationErrorResponse,
   ForbiddenError,
+  requireAuthenticatedUser,
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
@@ -17,7 +18,11 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const authenticatedUser = await requirePermission("attendance:read");
+    const sessionUser = await requireAuthenticatedUser();
+    const authenticatedUser =
+      sessionUser.role === "STUDENT"
+        ? sessionUser
+        : await requirePermission("attendance:read");
     const { id } = await params;
 
     const attendance = await prisma.attendance.findFirst({
