@@ -3,6 +3,7 @@ import {
   AuthorizationError,
   authorizationErrorResponse,
   ForbiddenError,
+  requireAuthenticatedUser,
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
@@ -57,7 +58,10 @@ export async function GET(
   { params }: { params: Promise<{ id: string }> },
 ) {
   try {
-    const authenticatedUser = await requirePermission("schedule:read");
+    const authenticatedUser = await requireAuthenticatedUser();
+    if (authenticatedUser.role !== "STUDENT") {
+      await requirePermission("schedule:read");
+    }
     const { id } = await params;
 
     const schedule = await prisma.schedule.findFirst({
@@ -71,6 +75,32 @@ export async function GET(
         },
         subject: { deletedAt: null },
         instructor: { deletedAt: null },
+        ...(authenticatedUser.role === "STUDENT"
+          ? {
+              class: {
+                is: {
+                  deletedAt: null,
+                  batch: {
+                    is: {
+                      deletedAt: null,
+                      program: { deletedAt: null },
+                      enrollments: {
+                        some: {
+                          student: {
+                            userId: authenticatedUser.id,
+                            deletedAt: null,
+                          },
+                          status: "ACTIVE",
+                          deletedAt: null,
+                        },
+                      },
+                    },
+                  },
+                  instructor: { deletedAt: null },
+                },
+              },
+            }
+          : {}),
       },
       select: scheduleSelect,
     });
