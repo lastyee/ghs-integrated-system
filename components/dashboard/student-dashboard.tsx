@@ -65,6 +65,21 @@ type StudentAttendance = {
   };
 };
 
+type StudentSchedule = {
+  id: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  room: string | null;
+  status: "SCHEDULED" | "COMPLETED" | "CANCELLED";
+  class: {
+    name: string;
+    batch: { name: string };
+  };
+  subject: { name: string };
+  instructor: { name: string };
+};
+
 type StudentAssessment = {
   id: string;
   name: string;
@@ -94,6 +109,7 @@ type DashboardData = {
   applications: StudentApplication[];
   interviews: StudentInterview[];
   placements: StudentPlacement[];
+  schedules: StudentSchedule[];
   attendances: StudentAttendance[];
   assessments: StudentAssessment[];
   documents: StudentDocument[];
@@ -104,9 +120,19 @@ type StudentDashboardProps = {
   userName?: string;
 };
 
+class DashboardHttpError extends Error {
+  constructor(
+    readonly status: number,
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
 async function fetchDashboardData(): Promise<DashboardData> {
   const urls = [
     "/api/profile",
+    "/api/schedules",
     "/api/applications",
     "/api/interviews",
     "/api/placements",
@@ -120,17 +146,30 @@ async function fetchDashboardData(): Promise<DashboardData> {
     urls.map(async (url) => {
       const response = await fetch(url, { headers: { Accept: "application/json" } });
       if (!response.ok) {
-        throw new Error(`Gagal memuat data dashboard (${url}, HTTP ${response.status}).`);
+        throw new DashboardHttpError(
+          response.status,
+          `Gagal memuat data dashboard (${url}, HTTP ${response.status}).`,
+        );
       }
       return response.json();
     }),
   );
 
-  const [profile, applications, interviews, placements, attendances, assessments, documents, certificates] =
-    responses;
+  const [
+    profile,
+    schedules,
+    applications,
+    interviews,
+    placements,
+    attendances,
+    assessments,
+    documents,
+    certificates,
+  ] = responses;
 
   if (
     !profile ||
+    !Array.isArray(schedules?.data) ||
     !Array.isArray(applications) ||
     !Array.isArray(interviews) ||
     !Array.isArray(placements?.data) ||
@@ -144,6 +183,7 @@ async function fetchDashboardData(): Promise<DashboardData> {
 
   return {
     profile,
+    schedules: schedules.data,
     applications,
     interviews,
     placements: placements.data,
@@ -157,6 +197,7 @@ async function fetchDashboardData(): Promise<DashboardData> {
 export function StudentDashboard({ userName }: StudentDashboardProps = {}) {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [errorStatus, setErrorStatus] = useState<number | null>(null);
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -167,6 +208,9 @@ export function StudentDashboard({ userName }: StudentDashboardProps = {}) {
       })
       .catch((loadError: unknown) => {
         if (isMounted) {
+          if (loadError instanceof DashboardHttpError) {
+            setErrorStatus(loadError.status);
+          }
           setError(loadError instanceof Error ? loadError.message : "Gagal memuat data dashboard.");
         }
       })
@@ -190,9 +234,22 @@ export function StudentDashboard({ userName }: StudentDashboardProps = {}) {
 
   if (error || !data) {
     return (
-      <p role="alert" className="mx-auto max-w-7xl p-6 text-sm text-red-700">
-        {error ?? "Data dashboard tidak tersedia."}
-      </p>
+      <div role="alert" className="mx-auto max-w-7xl p-6 text-sm text-red-700">
+        <p>
+          {errorStatus === 401
+            ? "Sesi Anda berakhir. Silakan login kembali."
+            : errorStatus === 403
+              ? "Anda tidak memiliki akses untuk membaca data dashboard."
+              : errorStatus !== null && errorStatus >= 500
+                ? "Terjadi kesalahan saat memuat dashboard. Silakan coba lagi."
+                : error ?? "Data dashboard tidak tersedia."}
+        </p>
+        {errorStatus === 401 && (
+          <Link href="/login" className="mt-2 inline-block font-semibold underline">
+            Login Ulang
+          </Link>
+        )}
+      </div>
     );
   }
 
@@ -209,6 +266,7 @@ export function StudentDashboard({ userName }: StudentDashboardProps = {}) {
     { label: "Catatan kehadiran", value: data.attendances.length, icon: ClipboardCheck, tone: "yellow" as const },
     { label: "Dokumen", value: data.documents.length, icon: FileCheck2, tone: "blue" as const },
   ];
+  const visibleSchedules = data.schedules.slice(0, 6);
 
   return (
     <div className="mx-auto max-w-7xl space-y-6 p-4 sm:p-6">
@@ -256,6 +314,42 @@ export function StudentDashboard({ userName }: StudentDashboardProps = {}) {
           )}
         </section>
       </div>
+
+      <section className="rounded-lg border border-[#EEEEEE] bg-white">
+        <SectionHeading title="Jadwal Saya" subtitle="Sesi pembelajaran dari enrollment aktif Anda." />
+        {visibleSchedules.length === 0 ? (
+          <EmptyState>Belum ada jadwal.</EmptyState>
+        ) : (
+          <div className="divide-y divide-[#EEEEEE]">
+            {visibleSchedules.map((schedule) => (
+              <div key={schedule.id} className="px-5 py-4">
+                <p className="text-sm font-semibold text-[#1B1B1B]">
+                  {schedule.subject.name} · {schedule.class.name}
+                </p>
+                <p className="mt-1 text-xs text-slate-500">
+                  {schedule.class.batch.name} · {schedule.instructor.name}
+                  {schedule.room ? ` · ${schedule.room}` : ""}
+                </p>
+                <time className="mt-1 block text-xs text-slate-500" dateTime={schedule.date}>
+                  {new Date(schedule.date).toLocaleDateString("id-ID", { timeZone: "UTC" })} ·{" "}
+                  {new Date(schedule.startTime).toLocaleTimeString("id-ID", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: "UTC",
+                  })}
+                  {"–"}
+                  {new Date(schedule.endTime).toLocaleTimeString("id-ID", {
+                    hour: "2-digit",
+                    minute: "2-digit",
+                    timeZone: "UTC",
+                  })}
+                </time>
+              </div>
+            ))}
+          </div>
+        )}
+        <SectionLink href="/schedules">Lihat jadwal</SectionLink>
+      </section>
 
       <div className="grid gap-6 xl:grid-cols-2">
         <section className="rounded-lg border border-[#EEEEEE] bg-white">

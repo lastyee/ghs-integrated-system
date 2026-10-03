@@ -2,6 +2,7 @@ import { Prisma, PrismaClient } from "@prisma/client";
 import {
   AuthorizationError,
   authorizationErrorResponse,
+  requireAuthenticatedUser,
   requirePermission,
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
@@ -53,8 +54,12 @@ const scheduleSelect = {
 
 export async function GET() {
   try {
-    const authenticatedUser = await requirePermission("schedule:read");
-    const where = {
+    const authenticatedUser = await requireAuthenticatedUser();
+    if (authenticatedUser.role !== "STUDENT") {
+      await requirePermission("schedule:read");
+    }
+
+    const where: Prisma.ScheduleWhereInput = {
       deletedAt: null,
       class: {
         deletedAt: null,
@@ -63,6 +68,32 @@ export async function GET() {
       },
       subject: { deletedAt: null },
       instructor: { deletedAt: null },
+      ...(authenticatedUser.role === "STUDENT"
+        ? {
+            class: {
+              is: {
+                deletedAt: null,
+                batch: {
+                  is: {
+                    deletedAt: null,
+                    program: { deletedAt: null },
+                    enrollments: {
+                      some: {
+                        student: {
+                          userId: authenticatedUser.id,
+                          deletedAt: null,
+                        },
+                        status: "ACTIVE",
+                        deletedAt: null,
+                      },
+                    },
+                  },
+                },
+                instructor: { deletedAt: null },
+              },
+            },
+          }
+        : {}),
       ...(authenticatedUser.role === "INSTRUCTOR"
         ? { instructorId: (await requireLinkedInstructor(authenticatedUser)).id }
         : {}),

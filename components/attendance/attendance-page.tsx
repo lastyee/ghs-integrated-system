@@ -89,7 +89,7 @@ export function AttendancePage() {
   const [attendances, setAttendances] = useState<ApiAttendanceItem[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [unauthorized, setUnauthorized] = useState(false);
+  const [authErrorStatus, setAuthErrorStatus] = useState<401 | 403 | null>(null);
   const [reloadKey, setReloadKey] = useState(0);
 
   const [query, setQuery] = useState("");
@@ -101,6 +101,8 @@ export function AttendancePage() {
 
   const handleReload = () => {
     setLoading(true);
+    setError(null);
+    setAuthErrorStatus(null);
     setReloadKey((k) => k + 1);
   };
 
@@ -116,9 +118,18 @@ export function AttendancePage() {
 
         if (ignore) return;
 
-        if (schedRes.status === 401 || attRes.status === 401 || schedRes.status === 403 || attRes.status === 403) {
-          setUnauthorized(true);
-          setError("Akses tidak diizinkan untuk membaca data absensi.");
+        const authError = [schedRes, attRes].find(
+          (response) => response.status === 401 || response.status === 403,
+        );
+        if (authError) {
+          setAuthErrorStatus(authError.status === 401 ? 401 : 403);
+          const data = await authError.json().catch(() => ({}));
+          setError(
+            data.error ||
+              (authError.status === 401
+                ? "Sesi Anda berakhir. Silakan login kembali."
+                : "Akses tidak diizinkan untuk membaca data absensi."),
+          );
           return;
         }
 
@@ -322,26 +333,33 @@ export function AttendancePage() {
         )}
 
         {/* 2. Unauthorized State */}
-        {!loading && unauthorized && (
+        {!loading && authErrorStatus !== null && (
           <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
             <div className="rounded-full bg-amber-100 p-3 text-amber-700">
               <Lock className="size-6" />
             </div>
-            <h3 className="mt-3 text-base font-bold text-[#102f50]">Akses Ditolak (Unauthorized)</h3>
+            <h3 className="mt-3 text-base font-bold text-[#102f50]">
+              {authErrorStatus === 401 ? "Login Diperlukan" : "Akses Ditolak"}
+            </h3>
             <p className="mt-1 max-w-md text-xs text-slate-500">
-              {error || "Anda tidak memiliki izin (attendance:read) untuk melihat data kehadiran."}
+              {error ||
+                (authErrorStatus === 401
+                  ? "Sesi Anda berakhir. Silakan login kembali."
+                  : "Anda tidak memiliki izin untuk melihat data kehadiran.")}
             </p>
-            <Link
-              href="/login"
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-4 py-2 text-xs font-semibold text-white hover:bg-[#1a4470]"
-            >
-              Login Ulang
-            </Link>
+            {authErrorStatus === 401 && (
+              <Link
+                href="/login"
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-4 py-2 text-xs font-semibold text-white hover:bg-[#1a4470]"
+              >
+                Login Ulang
+              </Link>
+            )}
           </div>
         )}
 
         {/* 3. Error State */}
-        {!loading && !unauthorized && error && (
+        {!loading && authErrorStatus === null && error && (
           <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
             <div className="rounded-full bg-red-100 p-3 text-red-600">
               <AlertCircle className="size-6" />
