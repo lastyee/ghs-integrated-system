@@ -51,7 +51,7 @@ export function CertificatesPage({ canDelete }: { canDelete: boolean }) {
   const [certificates, setCertificates] = useState<CertificateRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [unauthorized, setUnauthorized] = useState(false);
+  const [authErrorStatus, setAuthErrorStatus] = useState<401 | 403 | null>(null);
   const [userRole, setUserRole] = useState<string | null>(null);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
@@ -83,16 +83,19 @@ export function CertificatesPage({ canDelete }: { canDelete: boolean }) {
         }
 
         if (certsRes.status === 401 || certsRes.status === 403) {
-          setUnauthorized(true);
+          setAuthErrorStatus(certsRes.status);
           return;
         }
 
         if (!certsRes.ok) {
-          throw new Error("Gagal memuat daftar sertifikat");
+          throw new Error(`Gagal memuat daftar sertifikat (HTTP ${certsRes.status}).`);
         }
 
         const json = await certsRes.json();
-        setCertificates(json.data || []);
+        if (!Array.isArray(json.data)) {
+          throw new Error("Format data sertifikat tidak valid.");
+        }
+        setCertificates(json.data);
       })
       .catch((err) => {
         if (isMounted) setError(err.message || "Gagal memuat sertifikat");
@@ -175,15 +178,27 @@ export function CertificatesPage({ canDelete }: { canDelete: boolean }) {
     }
   }
 
-  if (unauthorized) {
+  if (authErrorStatus !== null) {
     return (
       <div data-testid="unauthorized-state" className="mx-auto max-w-7xl p-4 sm:p-8">
         <div className="flex min-h-[300px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm">
           <ShieldAlert className="size-12 text-[#c94242]" />
-          <h2 className="mt-4 text-lg font-bold text-[#102f50]">Akses Ditolak</h2>
+          <h2 className="mt-4 text-lg font-bold text-[#102f50]">
+            {authErrorStatus === 401 ? "Login Diperlukan" : "Akses Ditolak"}
+          </h2>
           <p className="mt-2 text-sm text-slate-500">
-            Anda tidak memiliki akses ke modul Sertifikat.
+            {authErrorStatus === 401
+              ? "Sesi Anda berakhir. Silakan login kembali."
+              : "Anda tidak memiliki akses ke modul Sertifikat."}
           </p>
+          {authErrorStatus === 401 && (
+            <Link
+              href="/login"
+              className="mt-4 rounded-lg bg-[#102f50] px-4 py-2 text-sm font-semibold text-white"
+            >
+              Login Ulang
+            </Link>
+          )}
         </div>
       </div>
     );
@@ -332,7 +347,12 @@ export function CertificatesPage({ canDelete }: { canDelete: boolean }) {
           <p className="mt-3 font-semibold text-red-800">{error}</p>
           <button
             type="button"
-            onClick={() => setRefreshTrigger((prev) => prev + 1)}
+            onClick={() => {
+              setError(null);
+              setAuthErrorStatus(null);
+              setLoading(true);
+              setRefreshTrigger((prev) => prev + 1);
+            }}
             className="mt-4 rounded-lg bg-red-600 px-4 py-2 text-xs font-semibold text-white hover:bg-red-700"
           >
             Coba Lagi

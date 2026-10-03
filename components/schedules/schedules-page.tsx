@@ -95,7 +95,7 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
   const [schedules, setSchedules] = useState<ApiSchedule[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
-  const [unauthorized, setUnauthorized] = useState(false);
+  const [authErrorStatus, setAuthErrorStatus] = useState<401 | 403 | null>(null);
 
   const [query, setQuery] = useState("");
   const [status, setStatus] = useState<string>("ALL");
@@ -134,6 +134,8 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
 
   const handleReload = () => {
     setLoading(true);
+    setError(null);
+    setAuthErrorStatus(null);
     setReloadKey((k) => k + 1);
   };
 
@@ -152,7 +154,7 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
         if (ignore) return;
 
         if (res.status === 401 || res.status === 403) {
-          setUnauthorized(true);
+          setAuthErrorStatus(res.status);
           const data = await res.json().catch(() => ({}));
           setError(data.error || "Akses tidak diizinkan untuk melihat jadwal.");
           return;
@@ -494,26 +496,33 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
         )}
 
         {/* 2. Unauthorized State */}
-        {!loading && unauthorized && (
+        {!loading && authErrorStatus !== null && (
           <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
             <div className="rounded-full bg-amber-100 p-3 text-amber-700">
               <Lock className="size-6" />
             </div>
-            <h3 className="mt-3 text-base font-bold text-[#102f50]">Akses Ditolak (Unauthorized)</h3>
+            <h3 className="mt-3 text-base font-bold text-[#102f50]">
+              {authErrorStatus === 401 ? "Login Diperlukan" : "Akses Ditolak"}
+            </h3>
             <p className="mt-1 max-w-md text-xs text-slate-500">
-              {error || "Anda tidak memiliki izin (schedule:read) untuk melihat jadwal pelatihan ini."}
+              {error ||
+                (authErrorStatus === 401
+                  ? "Sesi Anda berakhir. Silakan login kembali."
+                  : "Anda tidak memiliki izin untuk melihat jadwal pelatihan ini.")}
             </p>
-            <Link
-              href="/login"
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-4 py-2 text-xs font-semibold text-white hover:bg-[#1a4470]"
-            >
-              Login Ulang
-            </Link>
+            {authErrorStatus === 401 && (
+              <Link
+                href="/login"
+                className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-4 py-2 text-xs font-semibold text-white hover:bg-[#1a4470]"
+              >
+                Login Ulang
+              </Link>
+            )}
           </div>
         )}
 
         {/* 3. API Error State */}
-        {!loading && !unauthorized && error && (
+        {!loading && authErrorStatus === null && error && (
           <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
             <div className="rounded-full bg-red-100 p-3 text-red-600">
               <AlertCircle className="size-6" />
