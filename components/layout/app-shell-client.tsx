@@ -30,7 +30,7 @@ export function AppShellClient({
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen bg-[#f5f7fa]">
+    <div className="flex min-h-screen w-full min-w-0 bg-[#f5f7fa]">
       <AppSidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -48,7 +48,7 @@ export function AppShellClient({
           email={email}
           subtitle={subtitle}
         />
-        <main className="flex-1">{children}</main>
+        <main className="min-w-0 flex-1">{children}</main>
       </div>
     </div>
   );

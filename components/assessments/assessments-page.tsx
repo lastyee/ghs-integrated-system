@@ -786,7 +786,7 @@ function AssessmentModal({
     >
       <form
         onSubmit={onSubmit}
-        className="w-full max-w-2xl rounded-xl bg-white p-6 shadow-xl"
+        className="max-h-[calc(100dvh-2rem)] w-full max-w-2xl overflow-y-auto rounded-xl bg-white p-6 shadow-xl"
       >
         <div className="flex justify-between gap-4 border-b border-slate-100 pb-4">
           <div>

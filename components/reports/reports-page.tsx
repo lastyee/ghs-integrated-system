@@ -232,7 +232,7 @@ export function ReportsPage() {
       </div>
 
       {/* Role-Aware Navigation Tabs */}
-      <div className="mb-6 flex border-b border-[#EEEEEE]">
+      <div className="mb-6 flex flex-wrap border-b border-[#EEEEEE]">
         {allowedTabs.includes("academic") && (
           <button
             type="button"

@@ -188,7 +188,7 @@ export function AppSidebar({
         onClick={onClose}
       />
       <aside
-        className={`fixed inset-y-0 left-0 z-40 flex w-70 flex-col bg-[#1B1B1B] text-white shadow-2xl transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 lg:shadow-none border-r border-[#333333] ${
+        className={`fixed inset-y-0 left-0 z-40 flex w-[min(17.5rem,calc(100vw-2rem))] shrink-0 flex-col border-r border-[#333333] bg-[#1B1B1B] text-white shadow-2xl transition-transform duration-200 lg:static lg:z-auto lg:translate-x-0 lg:shadow-none ${
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
