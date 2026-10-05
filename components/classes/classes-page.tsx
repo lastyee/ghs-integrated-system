@@ -618,7 +618,7 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
                 className="inline-flex items-center gap-2 rounded-lg bg-[#c94242] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#a83232] transition disabled:opacity-50"
               >
                 {submitLoading && <Loader2 className="size-4 animate-spin" />}
-                {modal === "create" ? "Simpan Kelas" : "Simpan Perubahan"}
+                <span>{modal === "create" ? "Simpan Kelas" : "Simpan Perubahan"}</span>
               </button>
             </div>
           </form>
