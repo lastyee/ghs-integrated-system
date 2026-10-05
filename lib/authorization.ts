@@ -1,5 +1,7 @@
 import { PrismaClient } from "@prisma/client";
 import { auth } from "@/lib/auth";
+import { headers } from "next/headers";
+import { redirect } from "next/navigation";
 
 const prisma = new PrismaClient();
 
@@ -52,10 +54,22 @@ export async function requireAuthenticatedUser(): Promise<AuthenticatedUser> {
   });
 
   if (!activeUser) {
+    const headersList = await headers();
+    const accept = headersList.get("accept") || "";
+    const isPageRequest = accept.includes("text/html") || headersList.get("rsc") === "1";
+    if (isPageRequest) {
+      redirect("/login");
+    }
     throw new UnauthorizedError("User account is no longer active");
   }
 
   if (activeUser.role.name === "STUDENT" && activeUser.student?.deletedAt) {
+    const headersList = await headers();
+    const accept = headersList.get("accept") || "";
+    const isPageRequest = accept.includes("text/html") || headersList.get("rsc") === "1";
+    if (isPageRequest) {
+      redirect("/login");
+    }
     throw new UnauthorizedError("Student profile is no longer active");
   }
 
