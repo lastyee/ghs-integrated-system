@@ -3,7 +3,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { requireAuthenticatedUser } from "@/lib/authorization";
 
 export default async function StudentPage() {
-  const user = await requireAuthenticatedUser();
+  await requireAuthenticatedUser();
 
   return (
     <AppShell
@@ -12,7 +12,7 @@ export default async function StudentPage() {
       activeLabel="Dashboard"
       sidebarVariant="student"
     >
-      <StudentDashboard userName={user.name || undefined} />
+      <StudentDashboard />
     </AppShell>
   );
 }

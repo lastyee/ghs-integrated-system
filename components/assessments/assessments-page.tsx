@@ -85,7 +85,7 @@ const statuses: AssessmentSessionStatus[] = [
   AssessmentSessionStatus.COMPLETED,
 ];
 
-export function AssessmentsPage({ canDelete = false }: { canDelete?: boolean }) {
+export function AssessmentsPage({ canDelete = false, canCreate = false }: { canDelete?: boolean; canCreate?: boolean }) {
   const { showToast } = useToast();
   const [assessments, setAssessments] = useState<ApiAssessment[]>([]);
   const [classes, setClasses] = useState<ApiClass[]>([]);
@@ -323,14 +323,16 @@ export function AssessmentsPage({ canDelete = false }: { canDelete?: boolean }) 
           <h1 className="mt-2 text-2xl font-bold text-[#102f50]">Assessment</h1>
           <p className="mt-1 text-sm text-slate-500">Kelola penilaian dan nilai peserta</p>
         </div>
-        <button
-          type="button"
-          onClick={openCreate}
-          className="inline-flex w-fit items-center gap-2 rounded-lg bg-[#c94242] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#b03535] transition-colors"
-        >
-          <Plus className="size-4" />
-          Tambah Assessment
-        </button>
+        {canCreate && (
+          <button
+            type="button"
+            onClick={openCreate}
+            className="inline-flex w-fit items-center gap-2 rounded-lg bg-[#c94242] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#b03535] transition-colors"
+          >
+            <Plus className="size-4" />
+            Tambah Assessment
+          </button>
+        )}
       </div>
 
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">

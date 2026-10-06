@@ -65,9 +65,11 @@ function formatUtcTime(timeStr: string): string {
 export function AttendanceSessionDetail({
   scheduleId,
   canDelete = false,
+  canMutate = false,
 }: {
   scheduleId: string;
   canDelete?: boolean;
+  canMutate?: boolean;
 }) {
   const [schedule, setSchedule] = useState<ApiScheduleSummary | null>(null);
   const [attendances, setAttendances] = useState<ApiAttendanceItem[]>([]);
@@ -449,19 +451,21 @@ export function AttendanceSessionDetail({
             {batchName} · {formattedDate} ({startTime} - {endTime})
           </p>
         </div>
-        <button
-          type="button"
-          onClick={handleSetAllPresent}
-          disabled={savingId !== null}
-          className="inline-flex w-fit items-center gap-2 rounded-lg bg-[#c94242] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#b03636] disabled:opacity-50"
-        >
-          {savingId === "ALL" ? (
-            <Loader2 className="size-4 animate-spin" />
-          ) : (
-            <CheckCircle2 className="size-4" />
-          )}
-          Set Semua Hadir
-        </button>
+        {canMutate && (
+          <button
+            type="button"
+            onClick={handleSetAllPresent}
+            disabled={savingId !== null}
+            className="inline-flex w-fit items-center gap-2 rounded-lg bg-[#c94242] px-4 py-2.5 text-sm font-semibold text-white shadow-sm hover:bg-[#b03636] disabled:opacity-50"
+          >
+            {savingId === "ALL" ? (
+              <Loader2 className="size-4 animate-spin" />
+            ) : (
+              <CheckCircle2 className="size-4" />
+            )}
+            Set Semua Hadir
+          </button>
+        )}
       </div>
 
       {notice && (
