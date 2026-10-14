@@ -16,17 +16,18 @@ import {
   Save,
   AlertCircle,
 } from "lucide-react";
+import { StaffProfilePage } from "./staff-profile-page";
 
 type StudentProfileData = {
   id: string;
   name: string;
-  nim: string;
-  nik: string | null;
-  phone: string | null;
-  address: string | null;
+  nim?: string;
+  nik?: string | null;
+  phone?: string | null;
+  address?: string | null;
   email: string;
   role: string;
-  enrollment: {
+  enrollment?: {
     id: string;
     batchId: string;
     batchName: string;
@@ -160,6 +161,10 @@ export function StudentProfilePage() {
         </button>
       </div>
     );
+  }
+
+  if (profile.role !== "STUDENT") {
+    return <StaffProfilePage user={profile} />;
   }
 
   const initials = profile.name
@@ -300,22 +305,9 @@ export function StudentProfilePage() {
 
         {/* Card 2: Personal & Contact Information */}
         <div data-testid="student-profile-contact" className="rounded-lg border border-[#EEEEEE] bg-white p-5 space-y-4">
-          <div className="flex items-center justify-between border-b border-[#EEEEEE] pb-3">
-            <div className="flex items-center gap-2">
-              <User className="size-4 text-amber-600" />
-              <h3 className="text-sm font-semibold text-[#1B1B1B]">Data Pribadi & Kontak</h3>
-            </div>
-            <button
-              onClick={() => {
-                setEditPhone(profile.phone || "");
-                setEditAddress(profile.address || "");
-                setIsEditing(true);
-              }}
-              className="text-xs font-semibold text-[#BF120E] hover:underline inline-flex items-center gap-1"
-            >
-              <Edit2 className="size-3" />
-              Edit
-            </button>
+          <div className="flex items-center gap-2 border-b border-[#EEEEEE] pb-3">
+            <User className="size-4 text-amber-600" />
+            <h3 className="text-sm font-semibold text-[#1B1B1B]">Data Pribadi & Kontak</h3>
           </div>
 
           <div className="space-y-3 text-xs">
