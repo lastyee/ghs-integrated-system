@@ -5,14 +5,18 @@ import {
   Users,
   UserCheck,
   UserX,
+  UserPlus,
   Search,
   Shield,
   GraduationCap,
   Calendar,
   AlertCircle,
   RefreshCw,
+  Loader2,
+  X,
 } from "lucide-react";
 import { SoftDeleteAction } from "@/components/common/soft-delete-action";
+import { useToast } from "@/components/common/toast-provider";
 
 type UserItem = {
   id: string;
@@ -28,6 +32,7 @@ type UserItem = {
     nim: string;
     name: string;
   } | null;
+  isInactiveStudent?: boolean;
 };
 
 type UserStats = {
@@ -37,7 +42,14 @@ type UserStats = {
   unactivatedStudents: number;
 };
 
-export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
+export function UserManagementPage({
+  canDelete,
+  currentUserRole: initialRole,
+}: {
+  canDelete: boolean;
+  currentUserRole?: string;
+}) {
+  const { showToast } = useToast();
   const [users, setUsers] = useState<UserItem[]>([]);
   const [stats, setStats] = useState<UserStats | null>(null);
   const [loading, setLoading] = useState(true);
@@ -47,6 +59,101 @@ export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
   const [roleFilter, setRoleFilter] = useState("ALL");
   const [refreshTrigger, setRefreshTrigger] = useState(0);
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
+  const [currentUserRole, setCurrentUserRole] = useState<string | null>(initialRole || null);
+
+  const effectiveRole = currentUserRole || initialRole || "ADMIN";
+
+  // Create user modal
+  const [createModalOpen, setCreateModalOpen] = useState(false);
+  const [createName, setCreateName] = useState("");
+  const [createEmail, setCreateEmail] = useState("");
+  const [createPassword, setCreatePassword] = useState("");
+  const [createRole, setCreateRole] = useState(effectiveRole === "SUPER_ADMIN" ? "SUPER_ADMIN" : "ADMIN");
+  const [createLoading, setCreateLoading] = useState(false);
+  const [createError, setCreateError] = useState("");
+
+  const handleCreateUser = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (createPassword.length < 6) {
+      setCreateError("Password minimal 6 karakter.");
+      return;
+    }
+    setCreateLoading(true);
+    setCreateError("");
+
+    try {
+      const res = await fetch("/api/users", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: createName,
+          email: createEmail,
+          password: createPassword,
+          role: createRole,
+        }),
+      });
+
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Gagal membuat akun pengguna.");
+      }
+
+      setCreateModalOpen(false);
+      showToast("success", `Akun pengguna ${createName} (${createRole}) berhasil dibuat.`);
+      setCreateName("");
+      setCreateEmail("");
+      setCreatePassword("");
+      setRefreshTrigger((t) => t + 1);
+    } catch (err: unknown) {
+      setCreateError(err instanceof Error ? err.message : "Terjadi kesalahan.");
+    } finally {
+      setCreateLoading(false);
+    }
+  };
+
+  // Activation modal
+  const [actModalOpen, setActModalOpen] = useState(false);
+  const [actStudent, setActStudent] = useState<UserItem | null>(null);
+  const [actEmail, setActEmail] = useState("");
+  const [actPassword, setActPassword] = useState("");
+  const [actLoading, setActLoading] = useState(false);
+  const [actError, setActError] = useState("");
+
+  const handleActivate = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!actStudent || !actStudent.student) return;
+    if (actPassword.length < 6) {
+      setActError("Password minimal 6 karakter.");
+      return;
+    }
+    setActLoading(true);
+    setActError("");
+
+    try {
+      const res = await fetch("/api/auth/activate", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nim: actStudent.student.nim,
+          name: actStudent.student.name,
+          email: actEmail,
+          password: actPassword,
+        }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        throw new Error(data.error || "Gagal mengaktifkan akun.");
+      }
+      const studentName = actStudent.student.name;
+      setActModalOpen(false);
+      showToast("success", `Akun mahasiswa ${studentName} berhasil diaktifkan.`);
+      setRefreshTrigger((t) => t + 1);
+    } catch (err: unknown) {
+      setActError(err instanceof Error ? err.message : "Terjadi kesalahan.");
+    } finally {
+      setActLoading(false);
+    }
+  };
 
   useEffect(() => {
     let isMounted = true;
@@ -64,6 +171,9 @@ export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
           setUsers(data.users || []);
           setStats(data.stats || null);
           setCurrentUserId(data.currentUserId || null);
+          if (data.currentUserRole) {
+            setCurrentUserRole(data.currentUserRole);
+          }
         }
       })
       .catch((err: unknown) => {
@@ -148,8 +258,8 @@ export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
 
       {/* Table & Filter Card */}
       <div className="rounded-lg border border-[#EEEEEE] bg-white shadow-xs">
-        <div className="flex flex-col gap-4 border-b border-[#EEEEEE] p-5 sm:flex-row sm:items-center sm:justify-between">
-          <div>
+        <div className="flex flex-col gap-4 border-b border-[#EEEEEE] p-4 sm:p-5 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0 flex-1">
             <h2 className="text-sm font-bold text-[#1B1B1B]">
               Daftar Akun Pengguna Terdaftar
             </h2>
@@ -159,21 +269,21 @@ export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <div className="relative">
-              <Search className="absolute left-3 top-2.5 size-4 text-slate-400" />
+            <div className="relative min-w-0 flex-1 sm:flex-none">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <input
                 type="text"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
                 placeholder="Cari nama, email, NIM..."
-                className="h-9 w-48 rounded-md border border-[#EEEEEE] pl-9 pr-3 text-xs outline-none focus:border-[#BF120E] sm:w-60"
+                className="h-10 w-full min-w-0 rounded-md border border-[#EEEEEE] pl-9 pr-3 text-xs outline-none focus:border-[#BF120E] sm:w-60"
               />
             </div>
 
             <select
               value={roleFilter}
               onChange={(e) => setRoleFilter(e.target.value)}
-              className="h-9 rounded-md border border-[#EEEEEE] bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-[#BF120E]"
+              className="h-10 min-w-0 flex-1 rounded-md border border-[#EEEEEE] bg-white px-2.5 text-xs text-slate-700 outline-none focus:border-[#BF120E] sm:flex-none"
             >
               <option value="ALL">Semua Peran</option>
               <option value="SUPER_ADMIN">SUPER_ADMIN</option>
@@ -191,10 +301,25 @@ export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
                 setError(null);
                 setRefreshTrigger((t) => t + 1);
               }}
-              className="inline-flex size-9 items-center justify-center rounded-md border border-[#EEEEEE] bg-[#F8F8F8] text-slate-600 hover:bg-[#EEEEEE]"
+              className="inline-flex h-10 w-full items-center justify-center rounded-md border border-[#EEEEEE] bg-[#F8F8F8] text-slate-600 hover:bg-[#EEEEEE] sm:w-10 sm:flex-none"
               title="Segarkan data"
             >
-              <RefreshCw className="size-3.5" />
+              <RefreshCw className="size-4" />
+            </button>
+
+            <button
+              onClick={() => {
+                setCreateName("");
+                setCreateEmail("");
+                setCreatePassword("");
+                setCreateRole(effectiveRole === "SUPER_ADMIN" ? "SUPER_ADMIN" : "ADMIN");
+                setCreateError("");
+                setCreateModalOpen(true);
+              }}
+              className="inline-flex h-10 w-full items-center justify-center gap-1.5 rounded-md bg-[#BF120E] px-3.5 text-xs font-semibold text-white transition hover:bg-[#a00f0c] sm:w-auto sm:flex-none"
+            >
+              <UserPlus className="size-4" />
+              Tambah Pengguna
             </button>
           </div>
         </div>
@@ -269,7 +394,11 @@ export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
 
                       <td className="px-5 py-3">
                         {isStudentRole ? (
-                          hasLinkedStudent ? (
+                          u.isInactiveStudent ? (
+                            <span className="inline-flex items-center rounded-md bg-amber-50 px-2 py-0.5 text-[10px] font-medium text-amber-700 border border-amber-200">
+                              Belum Aktif
+                            </span>
+                          ) : hasLinkedStudent ? (
                             <span className="inline-flex items-center rounded-md bg-emerald-50 px-2 py-0.5 text-[10px] font-medium text-emerald-700 border border-emerald-200">
                               Aktif & Terverifikasi
                             </span>
@@ -302,18 +431,35 @@ export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
                             Akun yang sedang digunakan
                           </span>
                         ) : (
-                          canDelete ? (
-                            <SoftDeleteAction
-                              endpoint={`/api/users/${u.id}`}
-                              recordName="Pengguna"
-                              identifier={`${u.name || u.email} / ${u.email}`}
-                              description="Akun akan dinonaktifkan. Relasi Student/Instructor dan seluruh riwayat tetap tersimpan."
-                              onDeleted={() => {
-                                setLoading(true);
-                                setRefreshTrigger((trigger) => trigger + 1);
-                              }}
-                            />
-                          ) : null
+                          <div className="flex items-center justify-end gap-2">
+                            {u.isInactiveStudent && canDelete ? (
+                              <button
+                                type="button"
+                                onClick={() => {
+                                  setActStudent(u);
+                                  setActEmail("");
+                                  setActPassword("");
+                                  setActError("");
+                                  setActModalOpen(true);
+                                }}
+                                className="inline-flex items-center gap-1.5 rounded-md border border-[#BF120E] bg-white px-3 py-1 text-xs font-semibold text-[#BF120E] hover:bg-red-50"
+                              >
+                                Aktifkan Akun
+                              </button>
+                            ) : null}
+                            {canDelete && !u.isInactiveStudent ? (
+                              <SoftDeleteAction
+                                endpoint={`/api/users/${u.id}`}
+                                recordName="Pengguna"
+                                identifier={`${u.name || u.email} / ${u.email}`}
+                                description="Akun akan dinonaktifkan. Relasi Student/Instructor dan seluruh riwayat tetap tersimpan."
+                                onDeleted={() => {
+                                  setLoading(true);
+                                  setRefreshTrigger((trigger) => trigger + 1);
+                                }}
+                              />
+                            ) : null}
+                          </div>
                         )}
                       </td>
                     </tr>
@@ -324,6 +470,183 @@ export function UserManagementPage({ canDelete }: { canDelete: boolean }) {
           </div>
         )}
       </div>
+
+      {actModalOpen && actStudent && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <form onSubmit={handleActivate} className="w-full max-w-sm rounded-xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-[#EEEEEE] pb-3">
+              <h3 className="text-sm font-bold text-[#1B1B1B]">Aktifkan Akun Mahasiswa</h3>
+              <button
+                type="button"
+                onClick={() => setActModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-4 text-xs">
+              <div>
+                <p className="font-semibold text-[#1B1B1B]">Nama Mahasiswa</p>
+                <p className="text-slate-600">{actStudent.student?.name}</p>
+              </div>
+              <div>
+                <p className="font-semibold text-[#1B1B1B]">NIM</p>
+                <p className="text-slate-600">{actStudent.student?.nim}</p>
+              </div>
+
+              {actError && (
+                <div className="rounded-md border border-red-200 bg-red-50 p-2 text-red-700">
+                  {actError}
+                </div>
+              )}
+
+              <div>
+                <label className="block font-semibold text-[#1B1B1B]">Email Akun *</label>
+                <input
+                  type="email"
+                  value={actEmail}
+                  onChange={(e) => setActEmail(e.target.value)}
+                  placeholder="nama.mahasiswa@ghs.local"
+                  className="mt-1 w-full rounded-md border border-[#EEEEEE] px-3 py-2 outline-none focus:border-[#BF120E]"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#1B1B1B]">Password *</label>
+                <input
+                  type="password"
+                  value={actPassword}
+                  onChange={(e) => setActPassword(e.target.value)}
+                  placeholder="Minimal 6 karakter"
+                  className="mt-1 w-full rounded-md border border-[#EEEEEE] px-3 py-2 outline-none focus:border-[#BF120E]"
+                  required
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setActModalOpen(false)}
+                className="rounded-md border border-[#EEEEEE] bg-white px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={actLoading}
+                className="inline-flex items-center justify-center rounded-md bg-[#BF120E] px-4 py-2 text-xs font-semibold text-white hover:bg-[#a00f0c] disabled:opacity-50"
+              >
+                {actLoading ? <Loader2 className="size-3.5 animate-spin" /> : "Simpan Akun"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Modal Tambah Pengguna Baru */}
+      {createModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-950/40 p-4">
+          <form onSubmit={handleCreateUser} className="w-full max-w-md rounded-xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-[#EEEEEE] pb-3">
+              <div className="flex items-center gap-2">
+                <UserPlus className="size-4 text-[#BF120E]" />
+                <h3 className="text-sm font-bold text-[#1B1B1B]">Tambah Pengguna Baru</h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="size-4" />
+              </button>
+            </div>
+
+            {createError && (
+              <div className="mt-4 rounded-md border border-red-200 bg-red-50 p-2.5 text-xs text-red-700">
+                {createError}
+              </div>
+            )}
+
+            <div className="mt-4 space-y-3.5 text-xs">
+              <div>
+                <label className="block font-semibold text-[#1B1B1B]">Nama Lengkap *</label>
+                <input
+                  type="text"
+                  value={createName}
+                  onChange={(e) => setCreateName(e.target.value)}
+                  placeholder="misal: Muhamad Rivqi"
+                  className="mt-1 w-full rounded-md border border-[#EEEEEE] px-3 py-2 outline-none focus:border-[#BF120E]"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#1B1B1B]">Email Akun *</label>
+                <input
+                  type="email"
+                  value={createEmail}
+                  onChange={(e) => setCreateEmail(e.target.value)}
+                  placeholder="misal: admin@ghs.local"
+                  className="mt-1 w-full rounded-md border border-[#EEEEEE] px-3 py-2 outline-none focus:border-[#BF120E]"
+                  required
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#1B1B1B]">Password Awal *</label>
+                <input
+                  type="password"
+                  value={createPassword}
+                  onChange={(e) => setCreatePassword(e.target.value)}
+                  placeholder="Minimal 6 karakter"
+                  className="mt-1 w-full rounded-md border border-[#EEEEEE] px-3 py-2 outline-none focus:border-[#BF120E]"
+                  required
+                  minLength={6}
+                />
+              </div>
+
+              <div>
+                <label className="block font-semibold text-[#1B1B1B]">Peran (Role) *</label>
+                <select
+                  value={createRole}
+                  onChange={(e) => setCreateRole(e.target.value)}
+                  className="mt-1 w-full rounded-md border border-[#EEEEEE] bg-white px-3 py-2 text-xs text-slate-700 outline-none focus:border-[#BF120E]"
+                  required
+                >
+                  {effectiveRole === "SUPER_ADMIN" && (
+                    <option value="SUPER_ADMIN">SUPER_ADMIN (Hak Akses Penuh Sistem)</option>
+                  )}
+                  <option value="ADMIN">ADMIN (Administrator)</option>
+                  <option value="ACADEMIC_STAFF">ACADEMIC_STAFF (Staf Akademik)</option>
+                  <option value="INSTRUCTOR">INSTRUCTOR (Instruktur)</option>
+                  <option value="PLACEMENT_STAFF">PLACEMENT_STAFF (Staf Penempatan Kerja)</option>
+                  <option value="MANAGEMENT">MANAGEMENT (Pimpinan / Manajemen)</option>
+                </select>
+              </div>
+            </div>
+
+            <div className="mt-6 flex items-center justify-end gap-3">
+              <button
+                type="button"
+                onClick={() => setCreateModalOpen(false)}
+                className="rounded-md border border-[#EEEEEE] bg-white px-4 py-2 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+              >
+                Batal
+              </button>
+              <button
+                type="submit"
+                disabled={createLoading}
+                className="inline-flex items-center justify-center rounded-md bg-[#BF120E] px-4 py-2 text-xs font-semibold text-white hover:bg-[#a00f0c] disabled:opacity-50"
+              >
+                {createLoading ? <Loader2 className="size-3.5 animate-spin" /> : "Buat Pengguna"}
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
     </div>
   );
 }

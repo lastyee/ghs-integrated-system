@@ -11,7 +11,9 @@ export default auth((request) => {
     }
 
     const loginUrl = new URL("/login", request.nextUrl.origin);
-    loginUrl.searchParams.set("callbackUrl", request.nextUrl.pathname);
+    if (request.nextUrl.pathname !== "/" && request.nextUrl.pathname !== "/login") {
+      loginUrl.searchParams.set("callbackUrl", request.nextUrl.pathname + request.nextUrl.search);
+    }
     return NextResponse.redirect(loginUrl);
   }
 
@@ -22,6 +24,7 @@ export const config = {
   matcher: [
     "/",
     "/dashboard/:path*",
+    "/users/:path*",
     "/students/:path*",
     "/programs/:path*",
     "/subjects/:path*",

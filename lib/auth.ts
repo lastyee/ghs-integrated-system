@@ -56,6 +56,30 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     })
   ],
   callbacks: {
+    async redirect({ url, baseUrl }) {
+      if (url.startsWith("/")) {
+        if (url === "/" || url === "/login" || url.startsWith("/login?")) {
+          return `${baseUrl}/dashboard`
+        }
+        return `${baseUrl}${url}`
+      }
+      try {
+        const parsed = new URL(url)
+        if (parsed.origin === baseUrl) {
+          if (
+            parsed.pathname === "/" ||
+            parsed.pathname === "/login" ||
+            parsed.pathname.startsWith("/login?")
+          ) {
+            return `${baseUrl}/dashboard`
+          }
+          return url
+        }
+      } catch {
+        return `${baseUrl}/dashboard`
+      }
+      return `${baseUrl}/dashboard`
+    },
     async jwt({ token, user }) {
       if (user) {
         token.id = user.id

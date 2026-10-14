@@ -3,12 +3,33 @@ import { activateStudentSchema } from "@/schemas/activation";
 import { hashPassword } from "@/server/auth/password";
 import { createAuditLog } from "@/lib/audit-log";
 import { checkRateLimit } from "@/lib/rate-limit";
+import {
+  requireAuthenticatedUser,
+  authorizationErrorResponse,
+  AuthorizationError,
+  ForbiddenError,
+  type AuthenticatedUser,
+} from "@/lib/authorization";
 
 const prisma = new PrismaClient();
 
 export async function POST(request: Request) {
   try {
-    // 0. Global IP Abuse Protection Rate Limit (max 30 requests per minute)
+    // 0. Authorization check: Only SUPER_ADMIN and ADMIN are allowed to activate student accounts
+    let currentUser: AuthenticatedUser;
+    try {
+      currentUser = await requireAuthenticatedUser();
+      if (currentUser.role !== "SUPER_ADMIN" && currentUser.role !== "ADMIN") {
+        throw new ForbiddenError("Hanya Administrator yang memiliki hak akses untuk mengaktifkan akun mahasiswa.");
+      }
+    } catch (authError) {
+      if (authError instanceof AuthorizationError) {
+        return authorizationErrorResponse(authError);
+      }
+      throw authError;
+    }
+
+    // 0a. Global IP Abuse Protection Rate Limit (max 30 requests per minute)
     const forwarded = request.headers.get("x-forwarded-for");
     const ip = forwarded ? forwarded.split(",")[0].trim() : "127.0.0.1";
     const ipLimit = checkRateLimit(`activate:ip:${ip}`, 30, 60 * 1000);
@@ -168,10 +189,10 @@ export async function POST(request: Request) {
       await createAuditLog(
         tx,
         {
-          id: createdUser.id,
-          email: createdUser.email,
-          name: createdUser.name,
-          role: "STUDENT",
+          id: currentUser.id,
+          email: currentUser.email,
+          name: currentUser.name,
+          role: currentUser.role,
         },
         {
           action: "ACTIVATE_ACCOUNT",
@@ -197,6 +218,9 @@ export async function POST(request: Request) {
       { status: 201 }
     );
   } catch (error: unknown) {
+    if (error instanceof AuthorizationError) {
+      return authorizationErrorResponse(error);
+    }
     if (error instanceof Error) {
       if (error.message === "ALREADY_ACTIVATED") {
         return Response.json(

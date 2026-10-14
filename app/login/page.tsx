@@ -1,11 +1,67 @@
 "use client";
 
 import { FormEvent, useState } from "react";
-import { signIn } from "next-auth/react";
+import { signIn, getSession } from "next-auth/react";
 import { useRouter } from "next/navigation";
 import Image from "next/image";
-import Link from "next/link";
-import { LogIn, UserCheck, AlertCircle, ShieldCheck } from "lucide-react";
+import { LogIn, AlertCircle, ShieldCheck } from "lucide-react";
+
+function getSafeCallbackUrl(rawUrl: string | null): string | null {
+  if (!rawUrl) return null;
+  const trimmed = rawUrl.trim();
+  if (
+    !trimmed ||
+    trimmed === "/" ||
+    trimmed === "/login" ||
+    trimmed.startsWith("/login?")
+  ) {
+    return null;
+  }
+
+  if (trimmed.startsWith("//") || trimmed.startsWith("/\\") || trimmed.includes("\\")) {
+    return null;
+  }
+
+  if (trimmed.startsWith("/") && !trimmed.startsWith("//")) {
+    return trimmed;
+  }
+
+  if (typeof window !== "undefined") {
+    try {
+      const parsed = new URL(trimmed, window.location.origin);
+      if (parsed.origin === window.location.origin) {
+        const path = parsed.pathname + parsed.search + parsed.hash;
+        if (path !== "/" && path !== "/login" && !path.startsWith("/login?")) {
+          return path;
+        }
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}
+
+function getDashboardRouteForRole(role?: string | null): string {
+  switch (role) {
+    case "STUDENT":
+      return "/dashboard/student";
+    case "INSTRUCTOR":
+      return "/dashboard/instructor";
+    case "ACADEMIC_STAFF":
+      return "/dashboard/academic";
+    case "PLACEMENT_STAFF":
+      return "/dashboard/placement";
+    case "MANAGEMENT":
+      return "/dashboard/management";
+    case "SUPER_ADMIN":
+    case "ADMIN":
+      return "/dashboard";
+    default:
+      return "/dashboard";
+  }
+}
 
 export default function LoginPage() {
   const router = useRouter();
@@ -20,16 +76,17 @@ export default function LoginPage() {
     setIsSubmitting(true);
 
     try {
-      const callbackUrl =
+      const rawCallbackUrl =
         typeof window !== "undefined"
-          ? new URLSearchParams(window.location.search).get("callbackUrl") || "/"
-          : "/";
+          ? new URLSearchParams(window.location.search).get("callbackUrl")
+          : null;
+      const safeCallback = getSafeCallbackUrl(rawCallbackUrl);
 
       const result = await signIn("credentials", {
         email,
         password,
         redirect: false,
-        callbackUrl,
+        callbackUrl: safeCallback ?? undefined,
       });
 
       if (!result || result.error) {
@@ -37,7 +94,13 @@ export default function LoginPage() {
         return;
       }
 
-      router.replace(result.url ?? callbackUrl);
+      let destination = safeCallback;
+      if (!destination) {
+        const session = await getSession();
+        destination = getDashboardRouteForRole(session?.user?.role);
+      }
+
+      router.replace(destination);
       router.refresh();
     } catch {
       setError("Terjadi kesalahan saat proses verifikasi masuk.");
@@ -160,21 +223,6 @@ export default function LoginPage() {
               {isSubmitting ? "Memverifikasi..." : "Masuk"}
             </button>
           </form>
-
-          {/* Student Account Activation Action */}
-          <div className="mt-5 border-t border-[#EEEEEE] pt-4 text-center">
-            <p className="text-xs text-slate-600">
-              Belum mengaktifkan akun mahasiswa?
-            </p>
-            <Link
-              href="/activate"
-              className="mt-2 inline-flex items-center gap-1.5 rounded-md border border-[#BF120E] bg-white px-3.5 py-1.5 text-xs font-medium text-[#BF120E] transition hover:bg-red-50"
-            >
-              <UserCheck className="size-3.5" />
-              Aktifkan Akun Mahasiswa
-            </Link>
-          </div>
-
         </div>
       </div>
     </main>
