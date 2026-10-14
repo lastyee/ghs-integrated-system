@@ -122,11 +122,24 @@ export async function GET(request: Request) {
     const authenticatedUser = await requirePermission("interview:read");
     const { searchParams } = new URL(request.url);
 
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search")?.trim() || "";
+
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const rawAppId = searchParams.get("applicationId");
+    const rawStudentId = searchParams.get("studentId");
+    const rawVacancyId = searchParams.get("vacancyId");
+    const rawStatus = searchParams.get("status");
+
     const queryInput = {
-      applicationId: searchParams.get("applicationId") || undefined,
-      studentId: searchParams.get("studentId") || undefined,
-      vacancyId: searchParams.get("vacancyId") || undefined,
-      status: searchParams.get("status") || undefined,
+      applicationId: rawAppId && rawAppId !== "ALL" ? rawAppId : undefined,
+      studentId: rawStudentId && rawStudentId !== "ALL" ? rawStudentId : undefined,
+      vacancyId: rawVacancyId && rawVacancyId !== "ALL" ? rawVacancyId : undefined,
+      status: rawStatus && rawStatus !== "ALL" ? rawStatus : undefined,
     };
 
     const parsedQuery = interviewQuerySchema.safeParse(queryInput);
@@ -147,7 +160,14 @@ export async function GET(request: Request) {
       status,
     } = parsedQuery.data;
 
-    const where: Prisma.InterviewWhereInput = { deletedAt: null };
+    const baseWhere: Prisma.InterviewWhereInput = {
+      deletedAt: null,
+      application: {
+        deletedAt: null,
+        student: { deletedAt: null },
+        vacancy: { deletedAt: null, employer: { deletedAt: null } },
+      },
+    };
 
     if (authenticatedUser.role === "STUDENT") {
       const student = await prisma.student.findFirst({
@@ -166,53 +186,116 @@ export async function GET(request: Request) {
         );
       }
 
-      where.application = {
+      baseWhere.application = {
+        deletedAt: null,
         studentId: student.id,
-        ...(vacancyId && { vacancyId }),
+        student: { deletedAt: null },
+        vacancy: {
+          deletedAt: null,
+          employer: { deletedAt: null },
+          ...(vacancyId ? { id: vacancyId } : {}),
+        },
       };
 
       if (applicationId) {
-        where.applicationId = applicationId;
+        baseWhere.applicationId = applicationId;
       }
     } else {
       // Staff roles & Management
       if (applicationId) {
-        where.applicationId = applicationId;
+        baseWhere.applicationId = applicationId;
       }
       if (queryStudentId || vacancyId) {
-        where.application = {
-          ...(queryStudentId && { studentId: queryStudentId }),
-          ...(vacancyId && { vacancyId }),
+        baseWhere.application = {
+          deletedAt: null,
+          student: { deletedAt: null },
+          ...(queryStudentId ? { studentId: queryStudentId } : {}),
+          vacancy: {
+            deletedAt: null,
+            employer: { deletedAt: null },
+            ...(vacancyId ? { id: vacancyId } : {}),
+          },
         };
       }
     }
 
+    const statsWhere: Prisma.InterviewWhereInput = {
+      deletedAt: null,
+      ...baseWhere,
+    };
+
     if (status) {
-      where.status = status;
+      baseWhere.status = status;
     }
 
-    const interviews = await prisma.interview.findMany({
-      where: {
-        AND: [
-          where,
-          {
-            application: {
-              deletedAt: null,
-              student: { deletedAt: null },
-              vacancy: { deletedAt: null, employer: { deletedAt: null } },
-            },
-          },
-        ],
-      },
-      select: interviewListSelect,
-      orderBy: { scheduledAt: "desc" },
-    });
+    const searchWhere: Prisma.InterviewWhereInput = searchStr
+      ? {
+          OR: [
+            { location: { contains: searchStr, mode: "insensitive" as const } },
+            { method: { contains: searchStr, mode: "insensitive" as const } },
+            { notes: { contains: searchStr, mode: "insensitive" as const } },
+            { application: { student: { name: { contains: searchStr, mode: "insensitive" as const } } } },
+            { application: { student: { nim: { contains: searchStr, mode: "insensitive" as const } } } },
+            { application: { vacancy: { title: { contains: searchStr, mode: "insensitive" as const } } } },
+            { application: { vacancy: { employer: { name: { contains: searchStr, mode: "insensitive" as const } } } } },
+          ],
+        }
+      : {};
+
+    const where: Prisma.InterviewWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
+    const [
+      interviews,
+      total,
+      totalStats,
+      pendingStats,
+      rescheduledStats,
+      passedStats,
+      failedStats,
+    ] = await prisma.$transaction([
+      prisma.interview.findMany({
+        where,
+        skip,
+        take: limit,
+        select: interviewListSelect,
+        orderBy: { scheduledAt: "desc" },
+      }),
+      prisma.interview.count({ where }),
+      prisma.interview.count({ where: statsWhere }),
+      prisma.interview.count({ where: { ...statsWhere, status: "PENDING" } }),
+      prisma.interview.count({ where: { ...statsWhere, status: "RESCHEDULED" } }),
+      prisma.interview.count({ where: { ...statsWhere, status: "PASSED" } }),
+      prisma.interview.count({ where: { ...statsWhere, status: "FAILED" } }),
+    ]);
 
     const sanitizedInterviews = interviews.map((iv) =>
       sanitizeInterviewForRole(iv, authenticatedUser.role)
     );
 
-    return Response.json(sanitizedInterviews, { status: 200 });
+    const totalPages = Math.ceil(total / limit) || 1;
+
+    return Response.json(
+      {
+        data: sanitizedInterviews,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+        stats: {
+          total: totalStats,
+          pending: pendingStats,
+          rescheduled: rescheduledStats,
+          passed: passedStats,
+          failed: failedStats,
+        },
+      },
+      { status: 200 }
+    );
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

@@ -107,7 +107,18 @@ export function InterviewsPage({ userRole }: InterviewsPageProps) {
   const [unauthorized, setUnauthorized] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [apiStats, setApiStats] = useState<{
+    total: number;
+    pending: number;
+    rescheduled: number;
+    passed: number;
+    failed: number;
+  } | null>(null);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   const isStaff = useMemo(
@@ -125,83 +136,79 @@ export function InterviewsPage({ userRole }: InterviewsPageProps) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchQuery !== debouncedSearchQuery) {
+        setDebouncedSearchQuery(searchQuery);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery, debouncedSearchQuery]);
+
+  useEffect(() => {
     if (isForbiddenRole) return;
 
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
 
-    fetch("/api/interviews")
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: "20",
+      ...(debouncedSearchQuery.trim() ? { search: debouncedSearchQuery.trim() } : {}),
+      ...(statusFilter !== "ALL" ? { status: statusFilter } : {}),
+    });
+
+    fetch(`/api/interviews?${params.toString()}`)
       .then(async (res) => {
         if (!isMounted) return;
         if (res.status === 401 || res.status === 403) {
           setUnauthorized(true);
-          setLoading(false);
           return;
         }
 
         if (!res.ok) {
           setError("Gagal memuat daftar wawancara dari server.");
-          setLoading(false);
           return;
         }
 
-        const data = await res.json();
-        if (isMounted) {
-          setInterviews(Array.isArray(data) ? data : []);
-          setLoading(false);
+        const json = await res.json();
+        const list = Array.isArray(json) ? json : json.data || [];
+        setInterviews(list);
+        if (json.pagination) {
+          setTotal(json.pagination.total);
+          setTotalPages(json.pagination.totalPages);
+        } else {
+          setTotal(list.length);
+          setTotalPages(1);
+        }
+        if (json.stats) {
+          setApiStats(json.stats);
         }
       })
       .catch(() => {
         if (isMounted) {
           setError("Terjadi kesalahan jaringan saat memuat data wawancara.");
-          setLoading(false);
         }
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
       });
 
     return () => {
       isMounted = false;
     };
-  }, [isForbiddenRole, refreshTrigger]);
-
-  const filteredInterviews = useMemo(() => {
-    return interviews.filter((iv) => {
-      // Status filter
-      if (statusFilter !== "ALL" && iv.status !== statusFilter) {
-        return false;
-      }
-
-      // Search query filter
-      if (searchQuery.trim()) {
-        const query = searchQuery.toLowerCase().trim();
-        const studentName = iv.application?.student?.name?.toLowerCase() || "";
-        const studentNim = iv.application?.student?.nim?.toLowerCase() || "";
-        const vacancyTitle = iv.application?.vacancy?.title?.toLowerCase() || "";
-        const employerName =
-          iv.application?.vacancy?.employer?.name?.toLowerCase() || "";
-        const location = iv.location?.toLowerCase() || "";
-        const method = iv.method?.toLowerCase() || "";
-
-        return (
-          studentName.includes(query) ||
-          studentNim.includes(query) ||
-          vacancyTitle.includes(query) ||
-          employerName.includes(query) ||
-          location.includes(query) ||
-          method.includes(query)
-        );
-      }
-
-      return true;
-    });
-  }, [interviews, statusFilter, searchQuery]);
+  }, [isForbiddenRole, page, debouncedSearchQuery, statusFilter, refreshTrigger]);
 
   const stats = useMemo(() => {
-    const total = interviews.length;
+    if (apiStats) return apiStats;
+    const totalCount = interviews.length;
     const pending = interviews.filter((i) => i.status === "PENDING").length;
     const rescheduled = interviews.filter((i) => i.status === "RESCHEDULED").length;
     const passed = interviews.filter((i) => i.status === "PASSED").length;
     const failed = interviews.filter((i) => i.status === "FAILED").length;
-    return { total, pending, rescheduled, passed, failed };
-  }, [interviews]);
+    return { total: totalCount, pending, rescheduled, passed, failed };
+  }, [apiStats, interviews]);
 
   if (isForbiddenRole || unauthorized) {
     return (
@@ -298,7 +305,10 @@ export function InterviewsPage({ userRole }: InterviewsPageProps) {
             id="status-filter-select"
             data-testid="interview-status-filter"
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
             className="rounded-lg border border-slate-200 p-2 text-xs text-slate-800 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
           >
             <option value="ALL">Semua Status</option>
@@ -340,7 +350,7 @@ export function InterviewsPage({ userRole }: InterviewsPageProps) {
             Coba Lagi
           </button>
         </div>
-      ) : filteredInterviews.length === 0 ? (
+      ) : interviews.length === 0 ? (
         <div
           data-testid="empty-state"
           className="flex min-h-64 flex-col items-center justify-center rounded-xl border border-dashed border-slate-300 bg-slate-50/50 p-8 text-center"
@@ -360,110 +370,139 @@ export function InterviewsPage({ userRole }: InterviewsPageProps) {
           </p>
         </div>
       ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredInterviews.map((iv) => {
-            const scheduledDate = new Date(iv.scheduledAt);
-            const dateStr = scheduledDate.toLocaleDateString("id-ID", {
-              weekday: "long",
-              year: "numeric",
-              month: "long",
-              day: "numeric",
-            });
-            const timeStr = scheduledDate.toLocaleTimeString("id-ID", {
-              hour: "2-digit",
-              minute: "2-digit",
-            });
+        <>
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            {interviews.map((iv) => {
+              const scheduledDate = new Date(iv.scheduledAt);
+              const dateStr = scheduledDate.toLocaleDateString("id-ID", {
+                weekday: "long",
+                year: "numeric",
+                month: "long",
+                day: "numeric",
+              });
+              const timeStr = scheduledDate.toLocaleTimeString("id-ID", {
+                hour: "2-digit",
+                minute: "2-digit",
+              });
 
-            return (
-              <div
-                key={iv.id}
-                className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-xs transition-shadow hover:shadow-md"
-              >
-                <div>
-                  <div className="flex items-start justify-between gap-2">
-                    <InterviewStatusBadge status={iv.status} />
-                    <span className="text-[11px] font-medium text-slate-400">
-                      {iv.method || "Wawancara"}
+              return (
+                <div
+                  key={iv.id}
+                  className="flex flex-col justify-between rounded-xl border border-slate-200 bg-white p-5 shadow-xs transition-shadow hover:shadow-md"
+                >
+                  <div>
+                    <div className="flex items-start justify-between gap-2">
+                      <InterviewStatusBadge status={iv.status} />
+                      <span className="text-[11px] font-medium text-slate-400">
+                        {iv.method || "Wawancara"}
+                      </span>
+                    </div>
+
+                    <div className="mt-3.5 space-y-2">
+                      {/* Candidate (for staff / management) */}
+                      {!isStudent && (
+                        <div className="flex items-center gap-2">
+                          <User className="size-3.5 shrink-0 text-slate-400" />
+                          <span className="truncate text-xs font-bold text-slate-800">
+                            {iv.application?.student?.name}
+                          </span>
+                          <span className="text-[10px] text-slate-400">
+                            ({iv.application?.student?.nim})
+                          </span>
+                        </div>
+                      )}
+
+                      {/* Vacancy */}
+                      <div className="flex items-center gap-2">
+                        <Briefcase className="size-3.5 shrink-0 text-slate-400" />
+                        <span className="truncate text-xs font-semibold text-[#102f50]">
+                          {iv.application?.vacancy?.title}
+                        </span>
+                      </div>
+
+                      {/* Employer */}
+                      <div className="flex items-center gap-2">
+                        <Building2 className="size-3.5 shrink-0 text-slate-400" />
+                        <span className="truncate text-xs text-slate-600">
+                          {iv.application?.vacancy?.employer?.name}
+                        </span>
+                      </div>
+                    </div>
+
+                    <div className="mt-4 border-t border-slate-100 pt-3 space-y-1.5 text-xs text-slate-500">
+                      <div className="flex items-center gap-2">
+                        <CalendarDays className="size-3.5 shrink-0 text-slate-400" />
+                        <span>{dateStr}</span>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        <Clock3 className="size-3.5 shrink-0 text-slate-400" />
+                        <span>Pukul {timeStr} WIB</span>
+                      </div>
+                      {iv.location && (
+                        <div className="flex items-center gap-2">
+                          <MapPin className="size-3.5 shrink-0 text-slate-400" />
+                          <span className="truncate">{iv.location}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="mt-4 border-t border-slate-100 pt-3 flex items-center justify-between">
+                    <span className="text-[10px] text-slate-400">
+                      {new Date(iv.createdAt).toLocaleDateString("id-ID")}
                     </span>
-                  </div>
-
-                  <div className="mt-3.5 space-y-2">
-                    {/* Candidate (for staff / management) */}
-                    {!isStudent && (
-                      <div className="flex items-center gap-2">
-                        <User className="size-3.5 shrink-0 text-slate-400" />
-                        <span className="truncate text-xs font-bold text-slate-800">
-                          {iv.application?.student?.name}
-                        </span>
-                        <span className="text-[10px] text-slate-400">
-                          ({iv.application?.student?.nim})
-                        </span>
-                      </div>
-                    )}
-
-                    {/* Vacancy */}
-                    <div className="flex items-center gap-2">
-                      <Briefcase className="size-3.5 shrink-0 text-slate-400" />
-                      <span className="truncate text-xs font-semibold text-[#102f50]">
-                        {iv.application?.vacancy?.title}
-                      </span>
-                    </div>
-
-                    {/* Employer */}
-                    <div className="flex items-center gap-2">
-                      <Building2 className="size-3.5 shrink-0 text-slate-400" />
-                      <span className="truncate text-xs text-slate-600">
-                        {iv.application?.vacancy?.employer?.name}
-                      </span>
-                    </div>
-                  </div>
-
-                  <div className="mt-4 border-t border-slate-100 pt-3 space-y-1.5 text-xs text-slate-500">
-                    <div className="flex items-center gap-2">
-                      <CalendarDays className="size-3.5 shrink-0 text-slate-400" />
-                      <span>{dateStr}</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Clock3 className="size-3.5 shrink-0 text-slate-400" />
-                      <span>Pukul {timeStr} WIB</span>
-                    </div>
-                    {iv.location && (
-                      <div className="flex items-center gap-2">
-                        <MapPin className="size-3.5 shrink-0 text-slate-400" />
-                        <span className="truncate">{iv.location}</span>
-                      </div>
+                    <Link
+                      href={`/interviews/${iv.id}`}
+                      className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-[#102f50] hover:bg-slate-100 transition-colors"
+                    >
+                      <span>Detail Wawancara</span>
+                      <ExternalLink className="size-3" />
+                    </Link>
+                    {canDelete && (
+                      <SoftDeleteAction
+                        endpoint={`/api/interviews/${iv.id}`}
+                        recordName="Wawancara"
+                        identifier={`${iv.application?.student?.name || "Peserta"} / ${dateStr}`}
+                        description="Wawancara akan disembunyikan dari data aktif. Riwayat lamaran tetap tersimpan."
+                        onDeleted={() => {
+                          setLoading(true);
+                          setRefreshTrigger((prev) => prev + 1);
+                        }}
+                      />
                     )}
                   </div>
                 </div>
+              );
+            })}
+          </div>
 
-                <div className="mt-4 border-t border-slate-100 pt-3 flex items-center justify-between">
-                  <span className="text-[10px] text-slate-400">
-                    {new Date(iv.createdAt).toLocaleDateString("id-ID")}
-                  </span>
-                  <Link
-                    href={`/interviews/${iv.id}`}
-                    className="inline-flex items-center gap-1 rounded-md px-2.5 py-1 text-xs font-semibold text-[#102f50] hover:bg-slate-100 transition-colors"
-                  >
-                    <span>Detail Wawancara</span>
-                    <ExternalLink className="size-3" />
-                  </Link>
-                  {canDelete && (
-                    <SoftDeleteAction
-                      endpoint={`/api/interviews/${iv.id}`}
-                      recordName="Wawancara"
-                      identifier={`${iv.application?.student?.name || "Peserta"} / ${dateStr}`}
-                      description="Wawancara akan disembunyikan dari data aktif. Riwayat lamaran tetap tersimpan."
-                      onDeleted={() => {
-                        setLoading(true);
-                        setRefreshTrigger((prev) => prev + 1);
-                      }}
-                    />
-                  )}
-                </div>
+          {/* Pagination Controls */}
+          {total > 0 && (
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-xs">
+              <span className="text-xs text-slate-500">
+                Halaman {page} dari {totalPages} ({total} wawancara)
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Sebelumnya
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Berikutnya
+                </button>
               </div>
-            );
-          })}
-        </div>
+            </div>
+          )}
+        </>
       )}
 
       {/* Modal create */}

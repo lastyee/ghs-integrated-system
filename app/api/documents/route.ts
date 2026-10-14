@@ -76,11 +76,18 @@ export async function GET(request: Request) {
       }
     }
 
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search")?.trim() || "";
     const queryStudentId = searchParams.get("studentId");
     const queryStatus = searchParams.get("status");
     const queryType = searchParams.get("type");
 
-    const where: Prisma.DocumentWhereInput = {
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const baseWhere: Prisma.DocumentWhereInput = {
       deletedAt: null,
       student: { deletedAt: null },
     };
@@ -96,37 +103,108 @@ export async function GET(request: Request) {
       }
 
       // If student queries studentId, enforce it must match own student ID
-      if (queryStudentId && queryStudentId !== student.id) {
+      if (queryStudentId && queryStudentId !== "ALL" && queryStudentId !== student.id) {
         throw new ForbiddenError();
       }
 
-      where.studentId = student.id;
+      baseWhere.studentId = student.id;
     } else {
-      if (queryStudentId) {
-        where.studentId = queryStudentId;
+      if (queryStudentId && queryStudentId !== "ALL") {
+        baseWhere.studentId = queryStudentId;
       }
     }
 
     if (
       queryStatus &&
+      queryStatus !== "ALL" &&
       Object.values(DocumentStatus).includes(queryStatus as DocumentStatus)
     ) {
-      where.status = queryStatus as DocumentStatus;
+      baseWhere.status = queryStatus as DocumentStatus;
     }
 
-    if (queryType && queryType.trim()) {
-      where.type = queryType.trim();
+    if (queryType && queryType !== "ALL" && queryType.trim()) {
+      baseWhere.type = queryType.trim();
     }
 
-    const documents = await prisma.document.findMany({
-      where,
-      select: documentSelect,
-      orderBy: {
-        createdAt: "desc",
+    const searchWhere: Prisma.DocumentWhereInput = searchStr
+      ? {
+          OR: [
+            { fileName: { contains: searchStr, mode: "insensitive" as const } },
+            { type: { contains: searchStr, mode: "insensitive" as const } },
+            { student: { name: { contains: searchStr, mode: "insensitive" as const } } },
+            { student: { nim: { contains: searchStr, mode: "insensitive" as const } } },
+          ],
+        }
+      : {};
+
+    const where: Prisma.DocumentWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
+    const statsWhere: Prisma.DocumentWhereInput = {
+      deletedAt: null,
+      student: { deletedAt: null },
+      ...(authenticatedUser.role === "STUDENT" && baseWhere.studentId ? { studentId: baseWhere.studentId } : {}),
+    };
+
+    const [
+      documents,
+      total,
+      distinctTypes,
+      totalCount,
+      pendingCount,
+      verifiedCount,
+      rejectedCount,
+      expiredCount,
+    ] = await prisma.$transaction([
+      prisma.document.findMany({
+        where,
+        skip,
+        take: limit,
+        select: documentSelect,
+        orderBy: {
+          createdAt: "desc",
+        },
+      }),
+      prisma.document.count({ where }),
+      prisma.document.findMany({
+        where: statsWhere,
+        select: { type: true },
+        distinct: ["type"],
+        orderBy: { type: "asc" },
+      }),
+      prisma.document.count({ where: statsWhere }),
+      prisma.document.count({ where: { ...statsWhere, status: DocumentStatus.PENDING } }),
+      prisma.document.count({ where: { ...statsWhere, status: DocumentStatus.VERIFIED } }),
+      prisma.document.count({ where: { ...statsWhere, status: DocumentStatus.REJECTED } }),
+      prisma.document.count({ where: { ...statsWhere, status: DocumentStatus.EXPIRED } }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    return Response.json(
+      {
+        data: documents,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+        stats: {
+          total: totalCount,
+          pending: pendingCount,
+          verified: verifiedCount,
+          rejected: rejectedCount,
+          expired: expiredCount,
+        },
+        filterOptions: {
+          types: distinctTypes.map((d) => d.type).filter(Boolean),
+        },
       },
-    });
-
-    return Response.json(documents, { status: 200 });
+      { status: 200 }
+    );
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

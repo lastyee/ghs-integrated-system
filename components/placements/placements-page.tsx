@@ -124,7 +124,11 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
   const [unauthorized, setUnauthorized] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("ALL");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [isCreateOpen, setIsCreateOpen] = useState(false);
 
   const isStaff = useMemo(
@@ -141,11 +145,30 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchQuery !== debouncedSearchQuery) {
+        setDebouncedSearchQuery(searchQuery);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery, debouncedSearchQuery]);
+
+  useEffect(() => {
     if (isForbiddenRole) return;
 
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
 
-    fetch("/api/placements")
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: "20",
+      ...(debouncedSearchQuery.trim() ? { search: debouncedSearchQuery.trim() } : {}),
+      ...(statusFilter !== "ALL" ? { status: statusFilter } : {}),
+    });
+
+    fetch(`/api/placements?${params.toString()}`)
       .then(async (res) => {
         if (!isMounted) return;
         if (res.status === 401 || res.status === 403) {
@@ -161,6 +184,13 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
         const json = await res.json();
         const list = Array.isArray(json) ? json : json.data || [];
         setPlacements(list);
+        if (json.pagination) {
+          setTotal(json.pagination.total);
+          setTotalPages(json.pagination.totalPages);
+        } else {
+          setTotal(list.length);
+          setTotalPages(1);
+        }
       })
       .catch(() => {
         if (isMounted) setError("Terjadi kesalahan jaringan.");
@@ -172,32 +202,7 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
     return () => {
       isMounted = false;
     };
-  }, [isForbiddenRole, refreshTrigger]);
-
-  const filteredPlacements = useMemo(() => {
-    return placements.filter((p) => {
-      const matchStatus =
-        statusFilter === "ALL" ? true : p.status === statusFilter;
-      if (!matchStatus) return false;
-
-      if (!searchQuery.trim()) return true;
-
-      const q = searchQuery.toLowerCase();
-      const studentName = p.student?.name?.toLowerCase() || "";
-      const nim = p.student?.nim?.toLowerCase() || "";
-      const employerName = p.employer?.name?.toLowerCase() || "";
-      const position = p.position?.toLowerCase() || "";
-      const vacancyTitle = p.vacancy?.title?.toLowerCase() || "";
-
-      return (
-        studentName.includes(q) ||
-        nim.includes(q) ||
-        employerName.includes(q) ||
-        position.includes(q) ||
-        vacancyTitle.includes(q)
-      );
-    });
-  }, [placements, statusFilter, searchQuery]);
+  }, [isForbiddenRole, page, debouncedSearchQuery, statusFilter, refreshTrigger]);
 
   // Unauthorized State
   if (unauthorized || isForbiddenRole) {
@@ -290,7 +295,10 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
         <div className="flex items-center gap-2">
           <select
             value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
+            onChange={(e) => {
+              setStatusFilter(e.target.value);
+              setPage(1);
+            }}
             data-testid="placement-status-filter"
             aria-label="Filter status penempatan"
             className="rounded-lg border border-slate-200 px-3 py-2 text-xs font-medium text-slate-700 focus:border-[#102f50] focus:ring-1 focus:ring-[#102f50] focus:outline-hidden"
@@ -302,6 +310,21 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
             <option value="PLACED">Ditempatkan</option>
             <option value="CANCELLED">Dibatalkan</option>
           </select>
+          {(searchQuery || statusFilter !== "ALL") && (
+            <button
+              type="button"
+              onClick={() => {
+                setSearchQuery("");
+                setDebouncedSearchQuery("");
+                setStatusFilter("ALL");
+                setPage(1);
+              }}
+              className="inline-flex items-center gap-1 rounded-lg border border-slate-200 px-2.5 py-2 text-xs font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+            >
+              <RotateCcw className="size-3" />
+              Reset
+            </button>
+          )}
         </div>
       </div>
 
@@ -316,7 +339,7 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
             Memuat data penempatan...
           </p>
         </div>
-      ) : filteredPlacements.length === 0 ? (
+      ) : placements.length === 0 ? (
         /* Empty State */
         <div
           data-testid="empty-state"
@@ -372,8 +395,8 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100 font-medium text-slate-700">
-                {filteredPlacements.map((item) => (
+              <tbody className="divide-y border-slate-100 divide-slate-100 font-medium text-slate-700">
+                {placements.map((item) => (
                   <tr
                     key={item.id}
                     className="transition-colors hover:bg-slate-50/50"
@@ -447,7 +470,7 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
 
           {/* Mobile Card View */}
           <div className="grid gap-3 md:hidden">
-            {filteredPlacements.map((item) => (
+            {placements.map((item) => (
               <div
                 key={item.id}
                 className="space-y-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs"
@@ -510,6 +533,33 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
               </div>
             ))}
           </div>
+
+          {/* Pagination Controls */}
+          {total > 0 && (
+            <div className="flex items-center justify-between rounded-xl border border-slate-200 bg-white px-5 py-4 shadow-xs">
+              <span className="text-xs text-slate-500">
+                Halaman {page} dari {totalPages} ({total} penempatan)
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Sebelumnya
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Berikutnya
+                </button>
+              </div>
+            </div>
+          )}
         </>
       )}
 

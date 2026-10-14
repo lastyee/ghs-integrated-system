@@ -52,14 +52,29 @@ const scheduleSelect = {
   },
 } as const;
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search") || "";
+
+    const statusFilter = searchParams.get("status") || "ALL";
+    const dateFilter = searchParams.get("date") || "ALL";
+    const batchFilter = searchParams.get("batch") || "ALL";
+    const subjectFilter = searchParams.get("subject") || "ALL";
+    const instructorFilter = searchParams.get("instructor") || "ALL";
+
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
     const authenticatedUser = await requireAuthenticatedUser();
     if (authenticatedUser.role !== "STUDENT") {
       await requirePermission("schedule:read");
     }
 
-    const where: Prisma.ScheduleWhereInput = {
+    const baseWhere: Prisma.ScheduleWhereInput = {
       deletedAt: null,
       class: {
         deletedAt: null,
@@ -99,13 +114,137 @@ export async function GET() {
         : {}),
     };
 
-    const schedules = await prisma.schedule.findMany({
-      where,
-      select: scheduleSelect,
-      orderBy: [{ date: "asc" }, { startTime: "asc" }, { id: "asc" }],
-    });
+    if (statusFilter !== "ALL") {
+      baseWhere.status = statusFilter as "SCHEDULED" | "COMPLETED" | "CANCELLED";
+    }
 
-    return Response.json({ data: schedules });
+    if (dateFilter !== "ALL") {
+      const d = new Date(dateFilter);
+      if (!isNaN(d.getTime())) {
+        baseWhere.date = {
+          gte: d,
+          lt: new Date(d.getTime() + 24 * 60 * 60 * 1000),
+        };
+      }
+    }
+
+    if (batchFilter !== "ALL") {
+      baseWhere.class = {
+        ...(baseWhere.class as Prisma.ClassWhereInput),
+        batch: {
+          ...((baseWhere.class as Prisma.ClassWhereInput)?.batch as Prisma.BatchWhereInput),
+          name: batchFilter,
+        },
+      };
+    }
+
+    if (subjectFilter !== "ALL") {
+      baseWhere.subject = {
+        ...(baseWhere.subject as Prisma.SubjectWhereInput),
+        name: subjectFilter,
+      };
+    }
+
+    if (instructorFilter !== "ALL") {
+      baseWhere.instructor = {
+        ...(baseWhere.instructor as Prisma.InstructorWhereInput),
+        name: instructorFilter,
+      };
+    }
+
+    const searchWhere: Prisma.ScheduleWhereInput = searchStr
+      ? {
+          OR: [
+            { subject: { name: { contains: searchStr, mode: "insensitive" as const } } },
+            { instructor: { name: { contains: searchStr, mode: "insensitive" as const } } },
+            { class: { batch: { name: { contains: searchStr, mode: "insensitive" as const } } } },
+            { room: { contains: searchStr, mode: "insensitive" as const } },
+            { dressCode: { contains: searchStr, mode: "insensitive" as const } },
+            { topic: { contains: searchStr, mode: "insensitive" as const } },
+          ],
+        }
+      : {};
+
+    const where: Prisma.ScheduleWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
+    const [
+      schedules,
+      total,
+      distinctDatesObj,
+      totalSchedules,
+      ghi07Count,
+      ghi08Count,
+      scheduledCount,
+      distinctSubjects,
+      distinctInstructors,
+      distinctClasses,
+    ] = await prisma.$transaction([
+      prisma.schedule.findMany({
+        where,
+        skip,
+        take: limit,
+        select: scheduleSelect,
+        orderBy: [{ date: "asc" }, { startTime: "asc" }, { id: "asc" }],
+      }),
+      prisma.schedule.count({ where }),
+      prisma.schedule.findMany({
+        where: baseWhere,
+        select: { date: true },
+        distinct: ["date"],
+        orderBy: { date: "asc" },
+      }),
+      prisma.schedule.count({ where: baseWhere }),
+      prisma.schedule.count({ where: { ...baseWhere, class: { batch: { name: "GHI-07" } } } }),
+      prisma.schedule.count({ where: { ...baseWhere, class: { batch: { name: "GHI-08" } } } }),
+      prisma.schedule.count({ where: { ...baseWhere, status: "SCHEDULED" } }),
+      prisma.schedule.findMany({
+        where: baseWhere,
+        select: { subject: { select: { name: true } } },
+        distinct: ["subjectId"],
+      }),
+      prisma.schedule.findMany({
+        where: baseWhere,
+        select: { instructor: { select: { name: true } } },
+        distinct: ["instructorId"],
+      }),
+      prisma.schedule.findMany({
+        where: baseWhere,
+        select: { class: { select: { batch: { select: { name: true } } } } },
+        distinct: ["classId"],
+      }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+    const distinctDates = distinctDatesObj.map(d => d.date.toISOString().substring(0, 10));
+
+    const distinctBatchNames = [...new Set(distinctClasses.map(c => c.class?.batch?.name).filter(Boolean) as string[])].sort();
+    const distinctSubjectNames = [...new Set(distinctSubjects.map(s => s.subject?.name).filter(Boolean) as string[])].sort();
+    const distinctInstructorNames = [...new Set(distinctInstructors.map(i => i.instructor?.name).filter(Boolean) as string[])].sort();
+
+    return Response.json({
+      data: schedules,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+      stats: {
+        totalSchedules,
+        ghi07Count,
+        ghi08Count,
+        scheduledCount,
+      },
+      filterOptions: {
+        dates: distinctDates,
+        batches: distinctBatchNames,
+        subjects: distinctSubjectNames,
+        instructors: distinctInstructorNames,
+      }
+    });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

@@ -80,11 +80,25 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
   const [unauthorized, setUnauthorized] = useState(false);
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Filters
+  // Filters & Search
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [status, setStatus] = useState<"ALL" | DocumentStatus>("ALL");
   const [type, setType] = useState<string>("ALL");
   const [student, setStudent] = useState<string>("ALL");
+
+  // Pagination & Server Stats
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [stats, setStats] = useState({
+    total: 0,
+    pending: 0,
+    verified: 0,
+    rejected: 0,
+    expired: 0,
+  });
+  const [filterTypes, setFilterTypes] = useState<string[]>([]);
 
   // Upload modal state
   const [openUpload, setOpenUpload] = useState(false);
@@ -100,10 +114,56 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  // Debounce search 500ms
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (query !== debouncedQuery) {
+        setDebouncedQuery(query);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [query, debouncedQuery]);
+
+  // Fetch students for staff/admin dropdown
   useEffect(() => {
     let isMounted = true;
+    fetch("/api/students")
+      .then(async (response) => {
+        if (!isMounted) return;
+        if (response.ok) {
+          const data = await response.json();
+          const list = Array.isArray(data) ? data : (data.data || []);
+          if (Array.isArray(list) && isMounted) {
+            setStudents(list.map((item: { id: string; name: string; nim: string }) => ({ id: item.id, name: item.name, nim: item.nim })));
+          }
+        }
+      })
+      .catch(() => {
+        // Non-blocking
+      });
 
-    fetch("/api/documents")
+    return () => {
+      isMounted = false;
+    };
+  }, []);
+
+  // Fetch documents with server-side pagination and filters
+  useEffect(() => {
+    let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: "20",
+      ...(debouncedQuery.trim() ? { search: debouncedQuery.trim() } : {}),
+      ...(status !== "ALL" ? { status } : {}),
+      ...(type !== "ALL" ? { type } : {}),
+      ...(student !== "ALL" ? { studentId: student } : {}),
+    });
+
+    fetch(`/api/documents?${params.toString()}`)
       .then(async (response) => {
         if (!isMounted) return;
         if (response.status === 401 || response.status === 403) {
@@ -118,7 +178,21 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
         }
         const data = await response.json();
         if (isMounted) {
-          setDocuments(Array.isArray(data) ? data : []);
+          const list = Array.isArray(data) ? data : (data.data || []);
+          setDocuments(list);
+          if (data.pagination) {
+            setTotal(data.pagination.total);
+            setTotalPages(data.pagination.totalPages);
+          } else {
+            setTotal(list.length);
+            setTotalPages(1);
+          }
+          if (data.stats) {
+            setStats(data.stats);
+          }
+          if (data.filterOptions?.types) {
+            setFilterTypes(data.filterOptions.types);
+          }
           setUnauthorized(false);
           setLoading(false);
         }
@@ -130,63 +204,27 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
         }
       });
 
-    fetch("/api/students")
-      .then(async (response) => {
-        if (!isMounted) return;
-        if (response.ok) {
-          const data = await response.json();
-          if (Array.isArray(data) && isMounted) {
-            setStudents(data.map((item) => ({ id: item.id, name: item.name, nim: item.nim })));
-          }
-        }
-      })
-      .catch(() => {
-        // Non-blocking
-      });
-
     return () => {
       isMounted = false;
     };
-  }, [refreshTrigger]);
+  }, [page, debouncedQuery, status, type, student, refreshTrigger]);
 
-  // Derived unique types
+  // Derived unique types combining server filter options and loaded documents
   const existingTypes = useMemo(() => {
-    const set = new Set<string>();
+    const set = new Set<string>(filterTypes);
     documents.forEach((doc) => {
       if (doc.type) set.add(doc.type);
     });
     return Array.from(set);
-  }, [documents]);
-
-  const filtered = useMemo(() => {
-    return documents.filter((item) => {
-      const studentName = item.student?.name || "";
-      const studentNim = item.student?.nim || "";
-      const searchTarget = `${item.fileName} ${item.type} ${studentName} ${studentNim} ${item.studentId}`.toLowerCase();
-      const matchesQuery = !query.trim() || searchTarget.includes(query.toLowerCase());
-      const matchesStatus = status === "ALL" || item.status === status;
-      const matchesType = type === "ALL" || item.type === type;
-      const matchesStudent = student === "ALL" || item.studentId === student;
-
-      return matchesQuery && matchesStatus && matchesType && matchesStudent;
-    });
-  }, [documents, query, status, type, student]);
-
-  const counts = useMemo(() => {
-    return statuses.reduce<Record<DocumentStatus, number>>(
-      (acc, s) => {
-        acc[s] = documents.filter((doc) => doc.status === s).length;
-        return acc;
-      },
-      { PENDING: 0, VERIFIED: 0, REJECTED: 0, EXPIRED: 0 }
-    );
-  }, [documents]);
+  }, [filterTypes, documents]);
 
   const reset = () => {
     setQuery("");
+    setDebouncedQuery("");
     setStatus("ALL");
     setType("ALL");
     setStudent("ALL");
+    setPage(1);
   };
 
   const handleUploadSubmit = async (event: React.FormEvent) => {
@@ -324,35 +362,35 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
         <StatCard
           label="Total Dokumen"
-          value={String(documents.length)}
+          value={String(stats.total)}
           description="Seluruh dokumen tercatat"
           icon={FileText}
           tone="navy"
         />
         <StatCard
           label="Pending"
-          value={String(counts.PENDING)}
+          value={String(stats.pending)}
           description="Menunggu verifikasi"
           icon={FileText}
           tone="yellow"
         />
         <StatCard
           label="Verified"
-          value={String(counts.VERIFIED)}
+          value={String(stats.verified)}
           description="Telah diverifikasi"
           icon={FileText}
           tone="blue"
         />
         <StatCard
           label="Rejected"
-          value={String(counts.REJECTED)}
+          value={String(stats.rejected)}
           description="Ditolak verifikator"
           icon={FileText}
           tone="red"
         />
         <StatCard
           label="Expired"
-          value={String(counts.EXPIRED)}
+          value={String(stats.expired)}
           description="Masa berlaku habis"
           icon={FileText}
           tone="navy"
@@ -360,10 +398,10 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
       </section>
 
       {/* Search & Filters */}
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_repeat(3,minmax(150px,.7fr))_auto] xl:items-end">
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-[2fr_1fr_1fr_1fr_auto] xl:items-end">
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">
               Cari Dokumen
             </span>
             <span className="relative block">
@@ -372,16 +410,19 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Cari nama berkas, tipe, atau peserta"
-                className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#102f50] focus:outline-none"
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#102f50] focus:outline-none"
               />
             </span>
           </label>
 
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Status</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Status</span>
             <select
               value={status}
-              onChange={(e) => setStatus(e.target.value as "ALL" | DocumentStatus)}
+              onChange={(e) => {
+                setStatus(e.target.value as "ALL" | DocumentStatus);
+                setPage(1);
+              }}
               className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#102f50] focus:outline-none"
             >
               <option value="ALL">Semua Status</option>
@@ -394,12 +435,15 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
           </label>
 
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">
               Tipe Dokumen
             </span>
             <select
               value={type}
-              onChange={(e) => setType(e.target.value)}
+              onChange={(e) => {
+                setType(e.target.value);
+                setPage(1);
+              }}
               className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#102f50] focus:outline-none"
             >
               <option value="ALL">Semua Tipe</option>
@@ -413,12 +457,15 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
 
           {students.length > 0 && (
             <label>
-              <span className="mb-2 block text-xs font-semibold text-slate-600">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600">
                 Peserta
               </span>
               <select
                 value={student}
-                onChange={(e) => setStudent(e.target.value)}
+                onChange={(e) => {
+                  setStudent(e.target.value);
+                  setPage(1);
+                }}
                 className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#102f50] focus:outline-none"
               >
                 <option value="ALL">Semua Peserta</option>
@@ -434,7 +481,7 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
           <button
             type="button"
             onClick={reset}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
+            className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition-colors"
           >
             <RotateCcw className="size-4" />
             Reset Filter
@@ -447,7 +494,7 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
         <div className="border-b border-slate-100 px-5 py-4">
           <h2 className="font-bold text-[#102f50]">Daftar Dokumen</h2>
           <p className="mt-1 text-xs text-slate-500">
-            {loading ? "Memuat data..." : `${filtered.length} dokumen ditampilkan`}
+            {loading ? "Memuat data..." : `${total} dokumen ditemukan`}
           </p>
         </div>
 
@@ -456,7 +503,7 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
             <Loader2 className="size-6 animate-spin mr-2" />
             <span>Memuat data dokumen...</span>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : documents.length === 0 ? (
           <div className="p-12 text-center text-slate-500">
             <FileText className="mx-auto size-10 text-slate-300 mb-3" />
             <p className="font-medium text-slate-700">Tidak ada dokumen ditemukan</p>
@@ -487,7 +534,7 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map((item) => (
+                  {documents.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50/50 transition-colors">
                       <td className="px-5 py-4">
                         <p className="font-semibold text-[#102f50]">{item.fileName}</p>
@@ -546,7 +593,7 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
 
             {/* Mobile Card View */}
             <div className="divide-y divide-slate-100 md:hidden">
-              {filtered.map((item) => (
+              {documents.map((item) => (
                 <article key={item.id} className="p-5">
                   <div className="flex justify-between items-start gap-3">
                     <div>
@@ -589,6 +636,33 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
                 </article>
               ))}
             </div>
+
+            {/* Pagination Controls */}
+            {total > 0 && (
+              <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+                <span className="text-sm text-slate-500">
+                  Halaman {page} dari {totalPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1 || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Sebelumnya
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Berikutnya
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </section>
@@ -645,21 +719,6 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
                     ))}
                   </select>
                 </label>
-              )}
-              {deleteCandidate && (
-                <DeleteConfirmationDialog
-                  recordName={deleteCandidate.fileName}
-                  description="Object storage tetap aman; pembersihan storage tidak dilakukan."
-                  pending={deletePending}
-                  error={deleteError}
-                  onCancel={() => {
-                    if (!deletePending) {
-                      setDeleteCandidate(null);
-                      setDeleteError(null);
-                    }
-                  }}
-                  onConfirm={handleDelete}
-                />
               )}
 
               <label className="block">
@@ -731,6 +790,22 @@ export function DocumentsPage({ canDelete = false }: { canDelete?: boolean }) {
             </div>
           </form>
         </div>
+      )}
+
+      {deleteCandidate && (
+        <DeleteConfirmationDialog
+          recordName={deleteCandidate.fileName}
+          description="Object storage tetap aman; pembersihan storage tidak dilakukan."
+          pending={deletePending}
+          error={deleteError}
+          onCancel={() => {
+            if (!deletePending) {
+              setDeleteCandidate(null);
+              setDeleteError(null);
+            }
+          }}
+          onConfirm={handleDelete}
+        />
       )}
     </div>
   );

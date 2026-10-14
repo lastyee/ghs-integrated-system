@@ -18,17 +18,58 @@ const programSelect = {
   updatedAt: true,
 } as const;
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search") || "";
+
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
     await requirePermission("program:read");
 
-    const programs = await prisma.program.findMany({
-      where: { deletedAt: null },
-      select: programSelect,
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-    });
+    const baseWhere: Prisma.ProgramWhereInput = { deletedAt: null };
 
-    return Response.json({ data: programs });
+    const searchWhere: Prisma.ProgramWhereInput = searchStr
+      ? {
+          OR: [
+            { code: { contains: searchStr, mode: "insensitive" as const } },
+            { name: { contains: searchStr, mode: "insensitive" as const } },
+            { description: { contains: searchStr, mode: "insensitive" as const } },
+          ],
+        }
+      : {};
+
+    const where: Prisma.ProgramWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
+    const [programs, total] = await prisma.$transaction([
+      prisma.program.findMany({
+        where,
+        skip,
+        take: limit,
+        select: programSelect,
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+      }),
+      prisma.program.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    return Response.json({
+      data: programs,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { CalendarDays, MapPin, Video, FileText, Loader2, X } from "lucide-react";
+import { CalendarDays, MapPin, Video, FileText, Loader2, X, Search } from "lucide-react";
 
 export type ApplicationOption = {
   id: string;
@@ -37,55 +37,143 @@ export function InterviewFormModal({
   preselectedApplicationId,
 }: InterviewFormProps) {
   const [applications, setApplications] = useState<ApplicationOption[] | null>(null);
+  const [selectedAppRecord, setSelectedAppRecord] = useState<ApplicationOption | null>(null);
 
   const defaultAppId = initialApplicationId || preselectedApplicationId || "";
   const [applicationId, setApplicationId] = useState(defaultAppId);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [totalPages, setTotalPages] = useState(1);
+  const [total, setTotal] = useState(0);
+
   const [scheduledAt, setScheduledAt] = useState("");
   const [method, setMethod] = useState("Online");
   const [location, setLocation] = useState("");
   const [notes, setNotes] = useState("");
 
   const [submitting, setSubmitting] = useState(false);
+  const [loadingApps, setLoadingApps] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const safeApplications = applications || [];
-  const loadingApps = isOpen && applications === null;
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchQuery !== debouncedSearchQuery) {
+        setDebouncedSearchQuery(searchQuery);
+        setPage(1);
+      }
+    }, 400);
+    return () => clearTimeout(handler);
+  }, [searchQuery, debouncedSearchQuery]);
 
   useEffect(() => {
     if (!isOpen) return;
 
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoadingApps(true);
 
-    fetch("/api/applications")
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: "20",
+      ...(debouncedSearchQuery.trim() ? { search: debouncedSearchQuery.trim() } : {}),
+    });
+
+    fetch(`/api/applications?${params.toString()}`)
       .then(async (res) => {
         if (!isMounted) return;
         if (res.ok) {
-          const data = await res.json();
-          if (Array.isArray(data)) {
-            // Filter out REJECTED or WITHDRAWN
-            const valid = data.filter(
-              (a: ApplicationOption) =>
-                a.status !== "REJECTED" && a.status !== "WITHDRAWN"
-            );
-            setApplications(valid);
-            if (!defaultAppId && valid.length > 0) {
-              setApplicationId((prev) => prev || valid[0].id);
-            }
+          const json = await res.json();
+          const list: ApplicationOption[] = Array.isArray(json) ? json : (json.data || []);
+          if (json.pagination) {
+            setTotal(json.pagination.total);
+            setTotalPages(json.pagination.totalPages);
           } else {
-            setApplications([]);
+            setTotal(list.length);
+            setTotalPages(1);
           }
+
+          // Filter out REJECTED or WITHDRAWN
+          const valid = list.filter(
+            (a: ApplicationOption) =>
+              a.status !== "REJECTED" && a.status !== "WITHDRAWN"
+          );
+
+          // If defaultAppId is provided and not in valid list, fetch it directly
+          if (defaultAppId && !valid.some((a) => a.id === defaultAppId)) {
+            try {
+              const detailRes = await fetch(`/api/applications/${defaultAppId}`);
+              if (detailRes.ok) {
+                const detailData = await detailRes.json();
+                if (
+                  detailData &&
+                  detailData.id &&
+                  detailData.status !== "REJECTED" &&
+                  detailData.status !== "WITHDRAWN"
+                ) {
+                  const preloadedItem: ApplicationOption = {
+                    id: detailData.id,
+                    status: detailData.status,
+                    student: {
+                      id: detailData.student?.id || "",
+                      nim: detailData.student?.nim || "",
+                      name: detailData.student?.name || "",
+                    },
+                    vacancy: {
+                      id: detailData.vacancy?.id || "",
+                      title: detailData.vacancy?.title || "",
+                      employer: {
+                        id: detailData.vacancy?.employer?.id || "",
+                        name: detailData.vacancy?.employer?.name || "",
+                      },
+                    },
+                  };
+                  valid.unshift(preloadedItem);
+                  setSelectedAppRecord(preloadedItem);
+                }
+              }
+            } catch {
+              // Ignore preselected fetch error
+            }
+          }
+
+          setApplications(valid);
+          setApplicationId((prev) => {
+            if (!prev && valid.length > 0) {
+              const chosenId = defaultAppId || valid[0].id;
+              const foundRecord = valid.find((a) => a.id === chosenId);
+              if (foundRecord) setSelectedAppRecord(foundRecord);
+              return chosenId;
+            }
+            if (defaultAppId) {
+              return defaultAppId;
+            }
+            return prev;
+          });
         } else {
           setApplications([]);
         }
       })
       .catch(() => {
         if (isMounted) setApplications([]);
+      })
+      .finally(() => {
+        if (isMounted) setLoadingApps(false);
       });
 
     return () => {
       isMounted = false;
     };
-  }, [isOpen, defaultAppId]);
+  }, [isOpen, page, debouncedSearchQuery, defaultAppId]);
+
+  // Merge current selectedAppRecord if it's not present in the current paginated/searched list
+  const displayedOptions = [...(applications || [])];
+  if (
+    selectedAppRecord &&
+    !displayedOptions.some((a) => a.id === selectedAppRecord.id)
+  ) {
+    displayedOptions.unshift(selectedAppRecord);
+  }
 
   if (!isOpen) return null;
 
@@ -191,8 +279,23 @@ export function InterviewFormModal({
             >
               Pilih Lamaran Kandidat <span className="text-rose-500">*</span>
             </label>
-            {loadingApps ? (
-              <div className="mt-1 flex items-center gap-2 rounded-lg border border-slate-200 p-2.5 text-xs text-slate-500">
+
+            {/* Server-side Search Input */}
+            <div className="relative mt-1">
+              <Search className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                id="interview-application-search"
+                data-testid="interview-application-search"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Cari kandidat (nama, NIM, posisi, perusahaan)..."
+                className="w-full rounded-lg border border-slate-300 py-1.5 pl-8 pr-3 text-xs text-slate-800 placeholder:text-slate-400 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
+              />
+            </div>
+
+            {loadingApps && applications === null ? (
+              <div className="mt-1.5 flex items-center gap-2 rounded-lg border border-slate-200 p-2.5 text-xs text-slate-500">
                 <Loader2 className="size-3.5 animate-spin" />
                 Memuat data lamaran aktif...
               </div>
@@ -201,14 +304,23 @@ export function InterviewFormModal({
                 id="interview-application-select"
                 data-testid="interview-application-select"
                 value={applicationId}
-                onChange={(e) => setApplicationId(e.target.value)}
-                className="mt-1 w-full rounded-lg border border-slate-300 p-2.5 text-xs text-slate-800 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setApplicationId(val);
+                  const chosen = displayedOptions.find((a) => a.id === val);
+                  if (chosen) setSelectedAppRecord(chosen);
+                }}
+                className="mt-1.5 w-full rounded-lg border border-slate-300 p-2.5 text-xs text-slate-800 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
                 required
               >
-                {safeApplications.length === 0 ? (
-                  <option value="">Tidak ada lamaran aktif tersedia</option>
+                {displayedOptions.length === 0 ? (
+                  <option value="">
+                    {searchQuery
+                      ? "Tidak ada lamaran yang cocok dengan pencarian"
+                      : "Tidak ada lamaran aktif tersedia"}
+                  </option>
                 ) : (
-                  safeApplications.map((app) => (
+                  displayedOptions.map((app) => (
                     <option key={app.id} value={app.id}>
                       {app.student.name} ({app.student.nim}) — {app.vacancy.title} @{" "}
                       {app.vacancy.employer.name}
@@ -216,6 +328,33 @@ export function InterviewFormModal({
                   ))
                 )}
               </select>
+            )}
+
+            {/* Pagination Controls */}
+            {totalPages > 1 && (
+              <div className="mt-1.5 flex items-center justify-between text-[11px] text-slate-500">
+                <span>
+                  Halaman {page} dari {totalPages} ({total} total lamaran)
+                </span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1 || loadingApps}
+                    className="rounded border border-slate-200 px-2 py-0.5 text-[11px] font-medium hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    Sebelumnya
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages || loadingApps}
+                    className="rounded border border-slate-200 px-2 py-0.5 text-[11px] font-medium hover:bg-slate-50 disabled:opacity-40"
+                  >
+                    Berikutnya
+                  </button>
+                </div>
+              </div>
             )}
           </div>
 
@@ -309,7 +448,7 @@ export function InterviewFormModal({
             <button
               type="submit"
               data-testid="btn-submit-interview"
-              disabled={submitting || safeApplications.length === 0}
+              disabled={submitting || displayedOptions.length === 0}
               className="inline-flex items-center gap-1.5 rounded-lg bg-[#102f50] px-4 py-2 text-xs font-semibold text-white hover:bg-[#1a4470] disabled:opacity-50"
             >
               {submitting && <Loader2 className="size-3.5 animate-spin" />}

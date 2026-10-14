@@ -35,10 +35,21 @@ const classSelect = {
   },
 } as const;
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search") || "";
+    const statusStr = searchParams.get("status") || "ALL";
+    const batchIdStr = searchParams.get("batchId") || "ALL";
+
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
     const authenticatedUser = await requirePermission("class:read");
-    const where =
+    const baseWhere: Prisma.ClassWhereInput =
       authenticatedUser.role === "INSTRUCTOR"
         ? {
             deletedAt: null,
@@ -52,13 +63,61 @@ export async function GET() {
             instructor: { deletedAt: null },
           };
 
-    const classes = await prisma.class.findMany({
-      where,
-      select: classSelect,
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-    });
+    if (statusStr !== "ALL") {
+      baseWhere.status = statusStr as "SCHEDULED" | "COMPLETED" | "CANCELLED";
+    }
 
-    return Response.json({ data: classes });
+    if (batchIdStr !== "ALL") {
+      baseWhere.batchId = batchIdStr;
+    }
+
+    const searchWhere: Prisma.ClassWhereInput = searchStr
+      ? {
+          OR: [
+            { name: { contains: searchStr, mode: "insensitive" as const } },
+            { batch: { name: { contains: searchStr, mode: "insensitive" as const } } },
+            { instructor: { name: { contains: searchStr, mode: "insensitive" as const } } },
+          ],
+        }
+      : {};
+
+    const where: Prisma.ClassWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
+    const [classes, total, totalClasses, scheduled, completed, cancelled] = await prisma.$transaction([
+      prisma.class.findMany({
+        where,
+        skip,
+        take: limit,
+        select: classSelect,
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+      }),
+      prisma.class.count({ where }),
+      prisma.class.count({ where: baseWhere }),
+      prisma.class.count({ where: { ...baseWhere, status: "SCHEDULED" } }),
+      prisma.class.count({ where: { ...baseWhere, status: "COMPLETED" } }),
+      prisma.class.count({ where: { ...baseWhere, status: "CANCELLED" } }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    return Response.json({
+      data: classes,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+      stats: {
+        total: totalClasses,
+        scheduled,
+        completed,
+        cancelled,
+      },
+    });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

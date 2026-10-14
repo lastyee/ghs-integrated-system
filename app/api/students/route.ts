@@ -11,10 +11,19 @@ import { studentCreateSchema } from "@/schemas/student";
 
 const prisma = new PrismaClient();
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search") || "";
+
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
     const authenticatedUser = await requirePermission("student:read");
-    const where =
+    const baseWhere =
       authenticatedUser.role === "STUDENT"
         ? { userId: authenticatedUser.id, deletedAt: null }
         : authenticatedUser.role === "INSTRUCTOR"
@@ -37,6 +46,23 @@ export async function GET() {
             }
           : { deletedAt: null };
 
+    const searchWhere = searchStr
+      ? {
+          OR: [
+            { name: { contains: searchStr, mode: "insensitive" as const } },
+            { nim: { contains: searchStr, mode: "insensitive" as const } },
+            { nik: { contains: searchStr, mode: "insensitive" as const } },
+            { phone: { contains: searchStr, mode: "insensitive" as const } },
+            { address: { contains: searchStr, mode: "insensitive" as const } },
+          ],
+        }
+      : {};
+
+    const where: Prisma.StudentWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
     const studentSelect = {
       id: true,
       nim: true,
@@ -49,21 +75,36 @@ export async function GET() {
       updatedAt: true,
     } as const;
 
-    const students = await prisma.student.findMany({
-      where,
-      select: {
-        ...studentSelect,
-      },
-      orderBy: {
-        name: "asc",
-      },
-    });
+    const [students, total] = await prisma.$transaction([
+      prisma.student.findMany({
+        where,
+        skip,
+        take: limit,
+        select: {
+          ...studentSelect,
+        },
+        orderBy: {
+          name: "asc",
+        },
+      }),
+      prisma.student.count({ where }),
+    ]);
 
-    if (authenticatedUser.role === "STUDENT" && students.length === 0) {
+    if (authenticatedUser.role === "STUDENT" && total === 0) {
       throw new ForbiddenError();
     }
 
-    return Response.json({ data: students });
+    const totalPages = Math.ceil(total / limit);
+
+    return Response.json({
+      data: students,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Calendar, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X, AlertCircle, Trash2 } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -65,6 +65,10 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
   const [error, setError] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [selectedProgram, setSelectedProgram] = useState("ALL");
 
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
@@ -81,8 +85,33 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      if (query !== debouncedQuery) {
+        setDebouncedQuery(query);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [query, debouncedQuery]);
+
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setPage(1);
+  }, [selectedProgram]);
+
+  useEffect(() => {
     let isMounted = true;
-    Promise.all([fetch("/api/batches"), fetch("/api/programs")])
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: "20",
+      ...(debouncedQuery ? { search: debouncedQuery } : {}),
+      ...(selectedProgram !== "ALL" ? { programId: selectedProgram } : {}),
+    });
+
+    Promise.all([fetch(`/api/batches?${params.toString()}`), fetch("/api/programs")])
       .then(async ([batchesRes, programsRes]) => {
         if (!batchesRes.ok) {
           const errData = await batchesRes.json().catch(() => ({}));
@@ -94,11 +123,13 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
         }
         const batchesJson = await batchesRes.json();
         const programsJson = await programsRes.json();
-        return { batches: batchesJson.data || [], programs: programsJson.data || [] };
+        return { batchesJson, programs: programsJson.data || [] };
       })
-      .then(({ batches: bList, programs: pList }) => {
+      .then(({ batchesJson, programs: pList }) => {
         if (isMounted) {
-          setBatches(bList);
+          setBatches(batchesJson.data || []);
+          setTotal(batchesJson.pagination?.total || 0);
+          setTotalPages(batchesJson.pagination?.totalPages || 1);
           setPrograms(pList);
           setError(null);
           setLoading(false);
@@ -114,7 +145,7 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
     return () => {
       isMounted = false;
     };
-  }, [refreshTrigger]);
+  }, [refreshTrigger, page, debouncedQuery, selectedProgram]);
 
   const reloadBatches = () => {
     setLoading(true);
@@ -140,21 +171,6 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
       setDeletePending(false);
     }
   };
-
-  const filtered = useMemo(() => {
-    return batches.filter((batch) => {
-      const matchQuery =
-        !query.trim() ||
-        batch.name.toLowerCase().includes(query.toLowerCase()) ||
-        batch.program?.name.toLowerCase().includes(query.toLowerCase()) ||
-        batch.program?.code.toLowerCase().includes(query.toLowerCase());
-
-      const matchProgram =
-        selectedProgram === "ALL" || batch.programId === selectedProgram;
-
-      return matchQuery && matchProgram;
-    });
-  }, [batches, query, selectedProgram]);
 
   const openCreate = () => {
     setForm({
@@ -272,7 +288,7 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
         />
         <StatCard
           label="Batch Ditampilkan"
-          value={loading ? "..." : String(filtered.length)}
+          value={loading ? "..." : String(total)}
           description="Hasil filter & pencarian"
           icon={Calendar}
           tone="blue"
@@ -299,23 +315,23 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
         </div>
       )}
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_240px_auto] sm:items-end">
           <label className="relative">
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Cari Batch</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cari Batch</span>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Cari nama batch atau program..."
-                className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#123b63] focus:outline-none"
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#123b63] focus:outline-none"
               />
             </div>
           </label>
 
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Filter Program</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Filter Program</span>
             <select
               value={selectedProgram}
               onChange={(e) => setSelectedProgram(e.target.value)}
@@ -336,8 +352,9 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
               onClick={() => {
                 setQuery("");
                 setSelectedProgram("ALL");
+                setPage(1);
               }}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
             >
               <RotateCcw className="size-4" />
               Reset Filter
@@ -373,11 +390,11 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
           <div className="border-b border-slate-100 px-5 py-4 flex items-center justify-between">
             <div>
               <h2 className="font-bold text-[#102f50]">Daftar Batch</h2>
-              <p className="mt-1 text-xs text-slate-500">{filtered.length} batch ditemukan</p>
+              <p className="mt-1 text-xs text-slate-500">Menampilkan {batches.length} dari {total} batch</p>
             </div>
           </div>
 
-          {filtered.length === 0 ? (
+          {batches.length === 0 ? (
             <div className="p-8 text-center" data-testid="empty-state">
               <Calendar className="mx-auto size-12 text-slate-300" />
               <p className="mt-2 text-sm font-semibold text-slate-700">Tidak ada batch ditemukan</p>
@@ -400,7 +417,7 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map((batch) => (
+                  {batches.map((batch) => (
                     <tr key={batch.id} className="hover:bg-slate-50/60 transition">
                       <td className="px-5 py-4 font-semibold text-[#102f50]">{batch.name}</td>
                       <td className="px-5 py-4 text-slate-600">
@@ -453,6 +470,32 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+              <span className="text-sm text-slate-500">
+                Halaman {page} dari {totalPages}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Sebelumnya
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Berikutnya
+                </button>
+              </div>
             </div>
           )}
         </section>

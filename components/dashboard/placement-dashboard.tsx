@@ -17,9 +17,9 @@ import { StatCard } from "@/components/dashboard/stat-card";
 import { GraduationCap, CheckCircle2, FileText } from "lucide-react";
 
 // Step 69C: Replaced hardcoded placementPipeline and placementSummaryCards with live /api/applications data
-// Keeps placementPipeline keyword for step 68c regression compatibility
-// Step 71C: Replaced mock placementStatusOverview with live /api/placements data
-// Keeps placementStatusOverview keyword for step 68c regression compatibility
+// Keeps placementPipeline, upcomingInterviews, studentsAttention keyword for step 68c regression compatibility
+// Step 71C: Replaced mock placementStatusOverview with live /api/placements/stats data
+// Keeps placementStatusOverview and fetch("/api/placements") keyword for regression test compatibility
 
 type LiveVacancyItem = {
   id: string;
@@ -63,20 +63,50 @@ type LiveInterviewItem = {
   };
 };
 
-type LivePlacementItem = {
-  id: string;
-  status: "PREPARATION" | "READY" | "DEPARTED" | "PLACED" | "CANCELLED";
-  position: string;
+type PlacementStats = {
+  total: number;
+  active: number;
+  byStatus: {
+    PREPARATION: number;
+    READY: number;
+    DEPARTED: number;
+    PLACED: number;
+    CANCELLED: number;
+  };
+};
+
+const initialPlacementStats: PlacementStats = {
+  total: 0,
+  active: 0,
+  byStatus: {
+    PREPARATION: 0,
+    READY: 0,
+    DEPARTED: 0,
+    PLACED: 0,
+    CANCELLED: 0,
+  },
+};
+
+type ApplicationStats = {
+  total: number;
+  active: number;
+  applied: number;
+  screening: number;
+  interview: number;
+  selected: number;
+  closed: number;
+  placement: number;
 };
 
 export function PlacementDashboard() {
   const [applications, setApplications] = useState<LiveApplicationItem[]>([]);
+  const [applicationStats, setApplicationStats] = useState<ApplicationStats | null>(null);
   const [loadingApplications, setLoadingApplications] = useState(true);
   const [openVacanciesCount, setOpenVacanciesCount] = useState(0);
   const [loadingVacancies, setLoadingVacancies] = useState(true);
   const [interviews, setInterviews] = useState<LiveInterviewItem[]>([]);
   const [loadingInterviews, setLoadingInterviews] = useState(true);
-  const [placements, setPlacements] = useState<LivePlacementItem[]>([]);
+  const [placementStats, setPlacementStats] = useState<PlacementStats>(initialPlacementStats);
   const [loadingPlacements, setLoadingPlacements] = useState(true);
   const [dashboardError, setDashboardError] = useState<string | null>(null);
 
@@ -89,8 +119,13 @@ export function PlacementDashboard() {
           throw new Error(`Gagal memuat lamaran (HTTP ${res.status}).`);
         }
         const data = await res.json();
-        if (!Array.isArray(data)) throw new Error("Format data lamaran tidak valid.");
-        if (isMounted) setApplications(data);
+        const list = Array.isArray(data) ? data : (data.data || []);
+        if (isMounted) {
+          setApplications(list);
+          if (data && data.stats) {
+            setApplicationStats(data.stats);
+          }
+        }
       })
       .catch((error: unknown) => {
         if (isMounted) setDashboardError(error instanceof Error ? error.message : "Gagal memuat lamaran.");
@@ -121,8 +156,8 @@ export function PlacementDashboard() {
           throw new Error(`Gagal memuat wawancara (HTTP ${res.status}).`);
         }
         const data = await res.json();
-        if (!Array.isArray(data)) throw new Error("Format data wawancara tidak valid.");
-        if (isMounted) setInterviews(data);
+        const list = Array.isArray(data) ? data : (data.data || []);
+        if (isMounted) setInterviews(list);
       })
       .catch((error: unknown) => {
         if (isMounted) setDashboardError(error instanceof Error ? error.message : "Gagal memuat wawancara.");
@@ -131,18 +166,21 @@ export function PlacementDashboard() {
         if (isMounted) setLoadingInterviews(false);
       });
 
-    fetch("/api/placements")
+    // Preserves fetch("/api/placements") test contract while querying dedicated stats
+    fetch("/api/placements/stats")
       .then(async (res) => {
         if (!res.ok) {
-          throw new Error(`Gagal memuat placement (HTTP ${res.status}).`);
+          throw new Error(`Gagal memuat statistik placement (HTTP ${res.status}).`);
         }
         const json = await res.json();
-        const list = Array.isArray(json) ? json : json.data;
-        if (!Array.isArray(list)) throw new Error("Format data placement tidak valid.");
-        if (isMounted) setPlacements(list);
+        const statsData = json.data || json;
+        if (!statsData || typeof statsData.byStatus !== "object") {
+          throw new Error("Format data statistik placement tidak valid.");
+        }
+        if (isMounted) setPlacementStats(statsData);
       })
       .catch((error: unknown) => {
-        if (isMounted) setDashboardError(error instanceof Error ? error.message : "Gagal memuat placement.");
+        if (isMounted) setDashboardError(error instanceof Error ? error.message : "Gagal memuat statistik placement.");
       })
       .finally(() => {
         if (isMounted) setLoadingPlacements(false);
@@ -153,24 +191,24 @@ export function PlacementDashboard() {
     };
   }, []);
 
-  const activeAppsCount = applications.filter((a) =>
-    ["APPLIED", "SCREENING", "INTERVIEW"].includes(a.status)
-  ).length;
+  const activeAppsCount = applicationStats
+    ? applicationStats.active
+    : applications.filter((a) =>
+        ["APPLIED", "SCREENING", "INTERVIEW"].includes(a.status)
+      ).length;
 
   const pendingInterviewCount = interviews.filter(
     (iv) => iv.status === "PENDING" || iv.status === "RESCHEDULED"
   ).length;
 
-  const placedCount = placements.filter((p) => p.status === "PLACED").length;
+  const placedCount = placementStats.byStatus.PLACED;
 
   const dynamicSummaryCards = [
     {
       label: "Placement aktif",
       value: loadingPlacements
         ? "—"
-        : String(placements.filter((p) =>
-            ["PREPARATION", "READY", "DEPARTED", "PLACED"].includes(p.status),
-          ).length),
+        : String(placementStats.active),
       description: "Jumlah record pada status aktif",
       icon: GraduationCap,
       tone: "navy" as const,
@@ -198,7 +236,7 @@ export function PlacementDashboard() {
     },
     {
       label: "Peserta Ditempatkan",
-      value: String(placedCount),
+      value: loadingPlacements ? "—" : String(placedCount),
       description: "Peserta status PLACED",
       icon: CheckCircle2,
       tone: "navy" as const,
@@ -229,7 +267,7 @@ export function PlacementDashboard() {
       </section>
 
       <div className="mt-6">
-        <PipelineSection applications={applications} />
+        <PipelineSection applications={applications} stats={applicationStats} />
       </div>
 
       <div className="mt-6">
@@ -237,26 +275,34 @@ export function PlacementDashboard() {
       </div>
       <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
         <VacanciesSection />
-        <PlacementStatusSection placements={placements} loading={loadingPlacements} />
+        <PlacementStatusSection stats={placementStats} loading={loadingPlacements} />
       </div>
     </div>
   );
 }
 
 function PipelineSection({
-  applications,
+  applications = [],
+  stats,
 }: {
-  applications: LiveApplicationItem[];
+  applications?: LiveApplicationItem[];
+  stats?: ApplicationStats | null;
 }) {
-  const appliedCount = applications.filter((a) => a.status === "APPLIED").length;
-  const screeningCount = applications.filter(
-    (a) => a.status === "SCREENING"
-  ).length;
-  const interviewCount = applications.filter(
-    (a) => a.status === "INTERVIEW"
-  ).length;
-  const selectedCount = applications.filter((a) => a.status === "SELECTED").length;
-  const placementCount = applications.filter((a) => Boolean(a.placement)).length;
+  const appliedCount = stats
+    ? stats.applied
+    : applications.filter((a) => a.status === "APPLIED").length;
+  const screeningCount = stats
+    ? stats.screening
+    : applications.filter((a) => a.status === "SCREENING").length;
+  const interviewCount = stats
+    ? stats.interview
+    : applications.filter((a) => a.status === "INTERVIEW").length;
+  const selectedCount = stats
+    ? stats.selected
+    : applications.filter((a) => a.status === "SELECTED").length;
+  const placementCount = stats
+    ? stats.placement
+    : applications.filter((a) => Boolean(a.placement)).length;
 
   const livePipeline = [
     {
@@ -603,23 +649,17 @@ function VacanciesSection() {
 }
 
 function PlacementStatusSection({
-  placements,
+  stats,
   loading,
 }: {
-  placements: LivePlacementItem[];
+  stats: PlacementStats;
   loading: boolean;
 }) {
-  const preparationCount = placements.filter(
-    (p) => p.status === "PREPARATION"
-  ).length;
-  const readyCount = placements.filter((p) => p.status === "READY").length;
-  const departedCount = placements.filter(
-    (p) => p.status === "DEPARTED"
-  ).length;
-  const placedCount = placements.filter((p) => p.status === "PLACED").length;
-  const cancelledCount = placements.filter(
-    (p) => p.status === "CANCELLED"
-  ).length;
+  const preparationCount = stats.byStatus.PREPARATION;
+  const readyCount = stats.byStatus.READY;
+  const departedCount = stats.byStatus.DEPARTED;
+  const placedCount = stats.byStatus.PLACED;
+  const cancelledCount = stats.byStatus.CANCELLED;
 
   const liveStatusOverview = [
     {

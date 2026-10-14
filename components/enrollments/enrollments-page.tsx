@@ -328,23 +328,23 @@ export function EnrollmentsPage({ userRole }: EnrollmentsPageProps) {
         </div>
       )}
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_180px_200px_auto] sm:items-end">
           <label className="relative">
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Cari Peserta</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cari Peserta</span>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Cari nama, NIM, atau batch..."
-                className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#123b63] focus:outline-none"
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#123b63] focus:outline-none"
               />
             </div>
           </label>
 
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Status</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Status</span>
             <select
               value={statusFilter}
               onChange={(e) => setStatusFilter(e.target.value as "ALL" | EnrollmentStatus)}
@@ -360,7 +360,7 @@ export function EnrollmentsPage({ userRole }: EnrollmentsPageProps) {
           </label>
 
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Batch</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Batch</span>
             <select
               value={batchFilter}
               onChange={(e) => setBatchFilter(e.target.value)}
@@ -383,7 +383,7 @@ export function EnrollmentsPage({ userRole }: EnrollmentsPageProps) {
                 setStatusFilter("ALL");
                 setBatchFilter("ALL");
               }}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
             >
               <RotateCcw className="size-4" />
               Reset Filter

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { BookOpen, Edit3, Eye, Loader2, Plus, RotateCcw, Search, Trash2, X, AlertCircle } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -43,6 +43,10 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
 
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -58,8 +62,27 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
   const canDelete = userRole === "SUPER_ADMIN" || userRole === "ADMIN";
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      if (query !== debouncedQuery) {
+        setDebouncedQuery(query);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [query, debouncedQuery]);
+
+  useEffect(() => {
     let isMounted = true;
-    fetch("/api/subjects")
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: "20",
+      ...(debouncedQuery ? { search: debouncedQuery } : {}),
+    });
+
+    fetch(`/api/subjects?${params.toString()}`)
       .then(async (res) => {
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
@@ -70,6 +93,8 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
       .then((json) => {
         if (isMounted) {
           setSubjects(json.data || []);
+          setTotal(json.pagination?.total || 0);
+          setTotalPages(json.pagination?.totalPages || 1);
           setError(null);
           setLoading(false);
         }
@@ -84,10 +109,9 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
     return () => {
       isMounted = false;
     };
-  }, [refreshTrigger]);
+  }, [refreshTrigger, page, debouncedQuery]);
 
   const reloadSubjects = () => {
-    setLoading(true);
     setRefreshTrigger((prev) => prev + 1);
   };
 
@@ -110,18 +134,6 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
       setDeletePending(false);
     }
   };
-
-  const filtered = useMemo(() => {
-    return subjects.filter((subject) => {
-      if (!query.trim()) return true;
-      const q = query.toLowerCase();
-      return (
-        subject.code.toLowerCase().includes(q) ||
-        subject.name.toLowerCase().includes(q) ||
-        (subject.description && subject.description.toLowerCase().includes(q))
-      );
-    });
-  }, [query, subjects]);
 
   const openCreate = () => {
     setForm(emptyForm);
@@ -231,7 +243,7 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
         />
         <StatCard
           label="Mata Pelajaran Ditampilkan"
-          value={loading ? "..." : String(filtered.length)}
+          value={loading ? "..." : String(total)}
           description="Hasil filter & pencarian"
           icon={BookOpen}
           tone="blue"
@@ -258,7 +270,7 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
         </div>
       )}
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <label className="relative flex-1">
             <span className="sr-only">Cari Mata Pelajaran</span>
@@ -267,14 +279,14 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
               value={query}
               onChange={(e) => setQuery(e.target.value)}
               placeholder="Cari kode atau nama mata pelajaran..."
-              className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#123b63] focus:outline-none"
+              className="h-10 w-full min-w-0 rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#123b63] focus:outline-none"
             />
           </label>
           {query && (
             <button
               type="button"
               onClick={() => setQuery("")}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
             >
               <RotateCcw className="size-4" />
               Reset Filter
@@ -310,11 +322,11 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
           <div className="border-b border-slate-100 px-5 py-4 flex items-center justify-between">
             <div>
               <h2 className="font-bold text-[#102f50]">Daftar Mata Pelajaran</h2>
-              <p className="mt-1 text-xs text-slate-500">{filtered.length} mata pelajaran ditemukan</p>
+              <p className="mt-1 text-xs text-slate-500">Menampilkan {subjects.length} dari {total} mata pelajaran</p>
             </div>
           </div>
 
-          {filtered.length === 0 ? (
+          {subjects.length === 0 ? (
             <div className="p-8 text-center" data-testid="empty-state">
               <BookOpen className="mx-auto size-12 text-slate-300" />
               <p className="mt-2 text-sm font-semibold text-slate-700">Tidak ada mata pelajaran ditemukan</p>
@@ -335,7 +347,7 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map((subject) => (
+                  {subjects.map((subject) => (
                     <tr key={subject.id} className="hover:bg-slate-50/60 transition">
                       <td className="px-5 py-4 font-semibold text-[#123b63]">{subject.code}</td>
                       <td className="px-5 py-4 font-semibold text-[#102f50]">{subject.name}</td>
@@ -381,6 +393,32 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+              <span className="text-sm text-slate-500">
+                Halaman {page} dari {totalPages}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Sebelumnya
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Berikutnya
+                </button>
+              </div>
             </div>
           )}
         </section>

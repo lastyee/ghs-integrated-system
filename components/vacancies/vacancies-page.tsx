@@ -374,69 +374,78 @@ export function VacanciesPage({ userRole = "" }: { userRole?: string }) {
       </section>
 
       {/* Filters and Actions */}
-      <div className="mt-8 flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-        <div className="flex flex-1 flex-col gap-3 sm:flex-row sm:items-center">
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
           {/* Search Input */}
-          <div className="relative flex-1 max-w-sm">
-            <Search className="absolute left-3.5 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
-            <input
-              type="text"
-              id="vacancy-search-input"
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Cari posisi, perusahaan, syarat..."
-              className="w-full rounded-lg border border-slate-300 bg-white py-2 pl-10 pr-4 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
-            />
-          </div>
+          <label className="block min-w-0 flex-[1_1_100%] sm:flex-[2_1_250px]">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cari Lowongan</span>
+            <span className="relative block">
+              <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
+              <input
+                type="text"
+                id="vacancy-search-input"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                placeholder="Cari posisi, perusahaan, syarat..."
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-[#102f50]"
+              />
+            </span>
+          </label>
 
           {/* Employer Filter */}
-          <select
-            id="filter-vacancy-employer"
-            value={selectedEmployerId}
-            onChange={(e) => setSelectedEmployerId(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
-          >
-            <option value="ALL">Semua Perusahaan</option>
-            {employers.map((emp) => (
-              <option key={emp.id} value={emp.id}>
-                {emp.name}
-              </option>
-            ))}
-          </select>
+          <label className="block min-w-0 flex-[1_1_100%] sm:flex-[1_1_150px]">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Perusahaan</span>
+            <select
+              id="filter-vacancy-employer"
+              value={selectedEmployerId}
+              onChange={(e) => setSelectedEmployerId(e.target.value)}
+              className="h-10 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#102f50]"
+            >
+              <option value="ALL">Semua Perusahaan</option>
+              {employers.map((emp) => (
+                <option key={emp.id} value={emp.id}>
+                  {emp.name}
+                </option>
+              ))}
+            </select>
+          </label>
 
           {/* Status Filter */}
-          <select
-            id="filter-vacancy-status"
-            value={selectedStatus}
-            onChange={(e) => setSelectedStatus(e.target.value)}
-            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
-          >
-            <option value="ALL">Semua Status</option>
-            <option value="OPEN">Hanya Terbuka (OPEN)</option>
-            <option value="CLOSED">Hanya Ditutup (CLOSED)</option>
-          </select>
-        </div>
+          <label className="block min-w-0 flex-[1_1_100%] sm:flex-[1_1_150px]">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Status Lowongan</span>
+            <select
+              id="filter-vacancy-status"
+              value={selectedStatus}
+              onChange={(e) => setSelectedStatus(e.target.value)}
+              className="h-10 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm outline-none focus:border-[#102f50]"
+            >
+              <option value="ALL">Semua Status</option>
+              <option value="OPEN">Hanya Terbuka (OPEN)</option>
+              <option value="CLOSED">Hanya Ditutup (CLOSED)</option>
+            </select>
+          </label>
 
-        <div className="flex items-center gap-3">
-          <button
-            onClick={() => setRefreshTrigger((prev) => prev + 1)}
-            disabled={loading}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 disabled:opacity-50"
-            title="Muat Ulang"
-          >
-            <RotateCcw className={`size-3.5 ${loading ? "animate-spin" : ""}`} />
-            Refresh
-          </button>
-          <button
-            id="btn-create-vacancy"
-            onClick={openCreateModal}
-            className="inline-flex items-center gap-1.5 rounded-lg bg-[#102f50] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#1a4470] focus:outline-none focus:ring-2 focus:ring-[#102f50] focus:ring-offset-2"
-          >
-            <Plus className="size-4" />
-            Tambah Lowongan
-          </button>
+          <div className="flex flex-[1_1_100%] items-center gap-2 sm:flex-none">
+            <button
+              onClick={() => setRefreshTrigger((prev) => prev + 1)}
+              disabled={loading}
+              className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3 text-sm font-semibold text-slate-700 hover:bg-slate-50 disabled:opacity-50 sm:flex-none"
+              title="Muat Ulang"
+            >
+              <RotateCcw className={`size-4 ${loading ? "animate-spin" : ""}`} />
+              Refresh
+            </button>
+            <button
+              id="btn-create-vacancy"
+              onClick={openCreateModal}
+              className="inline-flex h-10 flex-1 items-center justify-center gap-2 rounded-lg bg-[#102f50] px-4 text-sm font-semibold text-white hover:bg-[#1a4470] sm:flex-none"
+            >
+              <Plus className="size-4" />
+              Tambah
+            </button>
+          </div>
         </div>
-      </div>
+      </section>
 
       {/* Main Content */}
       <div className="mt-6">

@@ -72,12 +72,26 @@ export async function GET(request: Request) {
     const authenticatedUser = await requirePermission("placement:read");
     const { searchParams } = new URL(request.url);
 
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const search = searchParams.get("search")?.trim() || "";
+
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const rawStudentId = searchParams.get("studentId");
+    const rawEmployerId = searchParams.get("employerId");
+    const rawVacancyId = searchParams.get("vacancyId");
+    const rawApplicationId = searchParams.get("applicationId");
+    const rawStatus = searchParams.get("status");
+
     const queryInput = {
-      studentId: searchParams.get("studentId") || undefined,
-      employerId: searchParams.get("employerId") || undefined,
-      vacancyId: searchParams.get("vacancyId") || undefined,
-      applicationId: searchParams.get("applicationId") || undefined,
-      status: searchParams.get("status") || undefined,
+      studentId: rawStudentId && rawStudentId !== "ALL" ? rawStudentId : undefined,
+      employerId: rawEmployerId && rawEmployerId !== "ALL" ? rawEmployerId : undefined,
+      vacancyId: rawVacancyId && rawVacancyId !== "ALL" ? rawVacancyId : undefined,
+      applicationId: rawApplicationId && rawApplicationId !== "ALL" ? rawApplicationId : undefined,
+      status: rawStatus && rawStatus !== "ALL" ? rawStatus : undefined,
     };
 
     const parsedQuery = placementQuerySchema.safeParse(queryInput);
@@ -99,7 +113,7 @@ export async function GET(request: Request) {
       status,
     } = parsedQuery.data;
 
-    const where: Prisma.PlacementWhereInput = {
+    const baseWhere: Prisma.PlacementWhereInput = {
       deletedAt: null,
       student: { deletedAt: null },
       employer: { deletedAt: null },
@@ -141,28 +155,63 @@ export async function GET(request: Request) {
         );
       }
 
-      where.studentId = student.id;
+      baseWhere.studentId = student.id;
 
-      if (employerId) where.employerId = employerId;
-      if (vacancyId) where.vacancyId = vacancyId;
-      if (applicationId) where.applicationId = applicationId;
-      if (status) where.status = status;
+      if (employerId) baseWhere.employerId = employerId;
+      if (vacancyId) baseWhere.vacancyId = vacancyId;
+      if (applicationId) baseWhere.applicationId = applicationId;
+      if (status) baseWhere.status = status;
     } else {
       // Staff roles & Management
-      if (queryStudentId) where.studentId = queryStudentId;
-      if (employerId) where.employerId = employerId;
-      if (vacancyId) where.vacancyId = vacancyId;
-      if (applicationId) where.applicationId = applicationId;
-      if (status) where.status = status;
+      if (queryStudentId) baseWhere.studentId = queryStudentId;
+      if (employerId) baseWhere.employerId = employerId;
+      if (vacancyId) baseWhere.vacancyId = vacancyId;
+      if (applicationId) baseWhere.applicationId = applicationId;
+      if (status) baseWhere.status = status;
     }
 
-    const placements = await prisma.placement.findMany({
-      where,
-      select: placementDetailSelect,
-      orderBy: { createdAt: "desc" },
-    });
+    const searchWhere: Prisma.PlacementWhereInput = search
+      ? {
+          OR: [
+            { position: { contains: search, mode: "insensitive" as const } },
+            { student: { name: { contains: search, mode: "insensitive" as const } } },
+            { student: { nim: { contains: search, mode: "insensitive" as const } } },
+            { employer: { name: { contains: search, mode: "insensitive" as const } } },
+            { vacancy: { title: { contains: search, mode: "insensitive" as const } } },
+          ],
+        }
+      : {};
 
-    return Response.json({ data: placements }, { status: 200 });
+    const where: Prisma.PlacementWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
+    const [placements, total] = await prisma.$transaction([
+      prisma.placement.findMany({
+        where,
+        skip,
+        take: limit,
+        select: placementDetailSelect,
+        orderBy: { createdAt: "desc" },
+      }),
+      prisma.placement.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit) || 1;
+
+    return Response.json(
+      {
+        data: placements,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+      },
+      { status: 200 }
+    );
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

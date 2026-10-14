@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Edit3, Eye, Loader2, Plus, RotateCcw, Search, X, AlertCircle, BookOpen } from "lucide-react";
 import { StatCard } from "@/components/dashboard/stat-card";
@@ -73,8 +73,19 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
   const [error, setError] = useState<string | null>(null);
 
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<"ALL" | ClassStatus>("ALL");
   const [batchFilter, setBatchFilter] = useState("ALL");
+
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [stats, setStats] = useState({
+    total: 0,
+    scheduled: 0,
+    completed: 0,
+    cancelled: 0,
+  });
 
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -87,9 +98,30 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      if (query !== debouncedQuery) {
+        setDebouncedQuery(query);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [query, debouncedQuery]);
+
+  useEffect(() => {
     let isMounted = true;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: "20",
+      ...(debouncedQuery ? { search: debouncedQuery } : {}),
+      ...(statusFilter !== "ALL" ? { status: statusFilter } : {}),
+      ...(batchFilter !== "ALL" ? { batchId: batchFilter } : {}),
+    });
+
     Promise.all([
-      fetch("/api/classes"),
+      fetch(`/api/classes?${params.toString()}`),
       fetch("/api/batches"),
       fetch("/api/instructors"),
     ])
@@ -112,14 +144,24 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
         const instructorsJson = await instructorsRes.json();
 
         return {
-          classes: classesJson.data || [],
+          classesJson,
           batches: batchesJson.data || [],
           instructors: instructorsJson.data || [],
         };
       })
-      .then(({ classes: cList, batches: bList, instructors: iList }) => {
+      .then(({ classesJson, batches: bList, instructors: iList }) => {
         if (isMounted) {
-          setClasses(cList);
+          setClasses(classesJson.data || []);
+          setTotal(classesJson.pagination?.total || 0);
+          setTotalPages(classesJson.pagination?.totalPages || 1);
+          setStats(
+            classesJson.stats || {
+              total: 0,
+              scheduled: 0,
+              completed: 0,
+              cancelled: 0,
+            }
+          );
           setBatches(bList);
           setInstructors(iList);
           setError(null);
@@ -136,27 +178,11 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
     return () => {
       isMounted = false;
     };
-  }, [refreshTrigger]);
+  }, [refreshTrigger, page, debouncedQuery, statusFilter, batchFilter]);
 
   const reloadClasses = () => {
-    setLoading(true);
     setRefreshTrigger((prev) => prev + 1);
   };
-
-  const filtered = useMemo(() => {
-    return classes.filter((item) => {
-      const matchQuery =
-        !query.trim() ||
-        item.name.toLowerCase().includes(query.toLowerCase()) ||
-        item.batch?.name.toLowerCase().includes(query.toLowerCase()) ||
-        item.instructor?.name.toLowerCase().includes(query.toLowerCase());
-
-      const matchStatus = statusFilter === "ALL" || item.status === statusFilter;
-      const matchBatch = batchFilter === "ALL" || item.batchId === batchFilter;
-
-      return matchQuery && matchStatus && matchBatch;
-    });
-  }, [classes, query, statusFilter, batchFilter]);
 
   const openCreate = () => {
     setForm({
@@ -272,28 +298,28 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <StatCard
           label="Total Kelas"
-          value={loading ? "..." : String(classes.length)}
+          value={loading ? "..." : String(stats.total)}
           description="Data live seluruh kelas"
           icon={BookOpen}
           tone="navy"
         />
         <StatCard
           label="Kelas Terjadwal"
-          value={loading ? "..." : String(classes.filter((c) => c.status === "SCHEDULED").length)}
+          value={loading ? "..." : String(stats.scheduled)}
           description="Status SCHEDULED"
           icon={BookOpen}
           tone="blue"
         />
         <StatCard
           label="Kelas Selesai"
-          value={loading ? "..." : String(classes.filter((c) => c.status === "COMPLETED").length)}
+          value={loading ? "..." : String(stats.completed)}
           description="Status COMPLETED"
           icon={BookOpen}
           tone="blue"
         />
         <StatCard
           label="Kelas Dibatalkan"
-          value={loading ? "..." : String(classes.filter((c) => c.status === "CANCELLED").length)}
+          value={loading ? "..." : String(stats.cancelled)}
           description="Status CANCELLED"
           icon={BookOpen}
           tone="red"
@@ -313,26 +339,29 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
         </div>
       )}
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
         <div className="grid gap-4 sm:grid-cols-[minmax(0,1fr)_180px_200px_auto] sm:items-end">
           <label className="relative">
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Cari Kelas</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cari Kelas</span>
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Cari kelas, batch, atau instruktur..."
-                className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#123b63] focus:outline-none"
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#123b63] focus:outline-none"
               />
             </div>
           </label>
 
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Status</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Status</span>
             <select
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value as "ALL" | ClassStatus)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value as "ALL" | ClassStatus);
+                setPage(1);
+              }}
               className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#123b63] focus:outline-none"
             >
               <option value="ALL">Semua Status</option>
@@ -345,10 +374,13 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
           </label>
 
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Batch</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Batch</span>
             <select
               value={batchFilter}
-              onChange={(e) => setBatchFilter(e.target.value)}
+              onChange={(e) => {
+                setBatchFilter(e.target.value);
+                setPage(1);
+              }}
               className="h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#123b63] focus:outline-none"
             >
               <option value="ALL">Semua Batch</option>
@@ -367,8 +399,9 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
                 setQuery("");
                 setStatusFilter("ALL");
                 setBatchFilter("ALL");
+                setPage(1);
               }}
-              className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+              className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
             >
               <RotateCcw className="size-4" />
               Reset Filter
@@ -404,11 +437,11 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
           <div className="border-b border-slate-100 px-5 py-4 flex items-center justify-between">
             <div>
               <h2 className="font-bold text-[#102f50]">Daftar Kelas</h2>
-              <p className="mt-1 text-xs text-slate-500">{filtered.length} kelas ditemukan</p>
+              <p className="mt-1 text-xs text-slate-500">Menampilkan {classes.length} dari {total} kelas</p>
             </div>
           </div>
 
-          {filtered.length === 0 ? (
+          {classes.length === 0 ? (
             <div className="p-8 text-center" data-testid="empty-state">
               <BookOpen className="mx-auto size-12 text-slate-300" />
               <p className="mt-2 text-sm font-semibold text-slate-700">Tidak ada kelas ditemukan</p>
@@ -432,7 +465,7 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map((item) => (
+                  {classes.map((item) => (
                     <tr key={item.id} className="hover:bg-slate-50/60 transition">
                       <td className="px-5 py-4 font-semibold text-[#102f50]">{item.name}</td>
                       <td className="px-5 py-4 text-slate-600">{item.batch?.name || "-"}</td>
@@ -477,6 +510,32 @@ export function ClassesPage({ userRole }: ClassesPageProps) {
                   ))}
                 </tbody>
               </table>
+            </div>
+          )}
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+              <span className="text-sm text-slate-500">
+                Halaman {page} dari {totalPages}
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.max(1, p - 1))}
+                  disabled={page === 1 || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Sebelumnya
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={page === totalPages || loading}
+                  className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                >
+                  Berikutnya
+                </button>
+              </div>
             </div>
           )}
         </section>

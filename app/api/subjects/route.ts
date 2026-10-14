@@ -18,17 +18,58 @@ const subjectSelect = {
   updatedAt: true,
 } as const;
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search") || "";
+
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
     await requirePermission("subject:read");
 
-    const subjects = await prisma.subject.findMany({
-      where: { deletedAt: null },
-      select: subjectSelect,
-      orderBy: [{ name: "asc" }, { id: "asc" }],
-    });
+    const baseWhere: Prisma.SubjectWhereInput = { deletedAt: null };
 
-    return Response.json({ data: subjects });
+    const searchWhere: Prisma.SubjectWhereInput = searchStr
+      ? {
+          OR: [
+            { name: { contains: searchStr, mode: "insensitive" as const } },
+            { code: { contains: searchStr, mode: "insensitive" as const } },
+            { description: { contains: searchStr, mode: "insensitive" as const } },
+          ],
+        }
+      : {};
+
+    const where: Prisma.SubjectWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
+    const [subjects, total] = await prisma.$transaction([
+      prisma.subject.findMany({
+        where,
+        skip,
+        take: limit,
+        select: subjectSelect,
+        orderBy: [{ name: "asc" }, { id: "asc" }],
+      }),
+      prisma.subject.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    return Response.json({
+      data: subjects,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

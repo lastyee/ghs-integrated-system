@@ -40,17 +40,66 @@ const batchSelect = {
   },
 } as const;
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
+    const { searchParams } = new URL(request.url);
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search") || "";
+    const programId = searchParams.get("programId") || "ALL";
+
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
     await requirePermission("batch:read");
 
-    const batches = await prisma.batch.findMany({
-      where: { deletedAt: null, program: { deletedAt: null } },
-      select: batchSelect,
-      orderBy: [{ startDate: "asc" }, { name: "asc" }, { id: "asc" }],
-    });
+    const baseWhere: Prisma.BatchWhereInput = {
+      deletedAt: null,
+      program: { deletedAt: null },
+    };
 
-    return Response.json({ data: batches });
+    if (programId !== "ALL") {
+      baseWhere.programId = programId;
+    }
+
+    const searchWhere: Prisma.BatchWhereInput = searchStr
+      ? {
+          OR: [
+            { name: { contains: searchStr, mode: "insensitive" as const } },
+            { program: { name: { contains: searchStr, mode: "insensitive" as const } } },
+            { program: { code: { contains: searchStr, mode: "insensitive" as const } } },
+          ],
+        }
+      : {};
+
+    const where: Prisma.BatchWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
+    const [batches, total] = await prisma.$transaction([
+      prisma.batch.findMany({
+        where,
+        skip,
+        take: limit,
+        select: batchSelect,
+        orderBy: [{ startDate: "asc" }, { name: "asc" }, { id: "asc" }],
+      }),
+      prisma.batch.count({ where }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    return Response.json({
+      data: batches,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+    });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

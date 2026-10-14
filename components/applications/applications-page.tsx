@@ -18,7 +18,7 @@ import {
   X,
   XCircle,
 } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 import {
@@ -49,6 +49,14 @@ export type ApplicationItem = {
       id: string;
       name: string;
     };
+  };
+};
+
+export type MinimalVacancyItem = {
+  id: string;
+  title: string;
+  employer: {
+    name: string;
   };
 };
 
@@ -99,9 +107,23 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
   const unauthorized = isAcademicOrInstructor || unauthorizedFromApi;
   const [refreshTrigger, setRefreshTrigger] = useState(0);
 
-  // Filters & Search
+  // Filters & Search & Pagination
   const [searchQuery, setSearchQuery] = useState("");
+  const [debouncedSearchQuery, setDebouncedSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState<string>("ALL");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [apiStats, setApiStats] = useState<{
+    total: number;
+    active: number;
+    applied?: number;
+    screening: number;
+    interview: number;
+    selected: number;
+    closed: number;
+    placement?: number;
+  } | null>(null);
 
   // Notice banner
   const [notice, setNotice] = useState<string>("");
@@ -128,6 +150,25 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState("");
 
+  // Vacancies for dropdown
+  const [availableVacancies, setAvailableVacancies] = useState<MinimalVacancyItem[]>([]);
+  const [vacanciesLoading, setVacanciesLoading] = useState(false);
+
+  // Students for dropdown (staff only)
+  const [availableStudents, setAvailableStudents] = useState<{ id: string; name: string; nim: string }[]>([]);
+  const [studentsLoading, setStudentsLoading] = useState(false);
+
+  // Search debounce 500ms
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (searchQuery !== debouncedSearchQuery) {
+        setDebouncedSearchQuery(searchQuery);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [searchQuery, debouncedSearchQuery]);
+
   // Fetch applications
   useEffect(() => {
     let isMounted = true;
@@ -137,10 +178,15 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
       return;
     }
 
-    const params = new URLSearchParams();
-    if (statusFilter !== "ALL") {
-      params.set("status", statusFilter);
-    }
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+
+    const params = new URLSearchParams({
+      page: String(page),
+      limit: "20",
+      ...(debouncedSearchQuery.trim() ? { search: debouncedSearchQuery.trim() } : {}),
+      ...(statusFilter !== "ALL" ? { status: statusFilter } : {}),
+    });
 
     fetch(`/api/applications?${params.toString()}`)
       .then(async (res) => {
@@ -148,18 +194,25 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
         if (res.status === 401 || res.status === 403) {
           setUnauthorizedFromApi(true);
           setApplications([]);
-          setLoading(false);
           return;
         }
         if (!res.ok) {
           const err = await res.json().catch(() => ({}));
           throw new Error(err.message || "Gagal memuat daftar lamaran.");
         }
-        const data = await res.json();
-        if (isMounted) {
-          setApplications(Array.isArray(data) ? data : []);
-          setUnauthorizedFromApi(false);
-          setLoading(false);
+        const json = await res.json();
+        const list = Array.isArray(json) ? json : json.data || [];
+        setApplications(list);
+        setUnauthorizedFromApi(false);
+        if (json.pagination) {
+          setTotal(json.pagination.total);
+          setTotalPages(json.pagination.totalPages);
+        } else {
+          setTotal(list.length);
+          setTotalPages(1);
+        }
+        if (json.stats) {
+          setApiStats(json.stats);
         }
       })
       .catch((err: unknown) => {
@@ -167,69 +220,106 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
           setError(
             err instanceof Error ? err.message : "Terjadi kesalahan saat memuat data."
           );
-          setLoading(false);
         }
+      })
+      .finally(() => {
+        if (isMounted) setLoading(false);
       });
 
     return () => {
       isMounted = false;
     };
-  }, [refreshTrigger, statusFilter, isAcademicOrInstructor]);
+  }, [page, debouncedSearchQuery, statusFilter, refreshTrigger, isAcademicOrInstructor]);
 
-  // Client-side search filtering
-  const filteredApplications = useMemo(() => {
-    if (!searchQuery.trim()) return applications;
-    const lower = searchQuery.toLowerCase();
-    return applications.filter((app) => {
-      return (
-        app.student.name.toLowerCase().includes(lower) ||
-        app.student.nim.toLowerCase().includes(lower) ||
-        app.vacancy.title.toLowerCase().includes(lower) ||
-        app.vacancy.employer.name.toLowerCase().includes(lower)
-      );
-    });
-  }, [applications, searchQuery]);
+  // Fetch vacancies for create form
+  useEffect(() => {
+    let isMounted = true;
+    if (createModalOpen) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setVacanciesLoading(true);
+      fetch("/api/vacancies")
+        .then(res => res.json())
+        .then(data => {
+          if (!isMounted) return;
+          if (Array.isArray(data)) {
+            setAvailableVacancies(data);
+          } else if (data && Array.isArray(data.data)) {
+            setAvailableVacancies(data.data);
+          }
+        })
+        .catch(console.error)
+        .finally(() => {
+          if (isMounted) setVacanciesLoading(false);
+        });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [createModalOpen]);
 
-  // Counts for Student view
-  const studentActiveCount = useMemo(
-    () =>
-      applications.filter((a) =>
+  // Fetch students for create form (staff only)
+  useEffect(() => {
+    let isMounted = true;
+    if (createModalOpen && !isStudent) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setStudentsLoading(true);
+      fetch("/api/students?limit=100")
+        .then(res => res.json())
+        .then(data => {
+          if (!isMounted) return;
+          const list = Array.isArray(data) ? data : data?.data || [];
+          if (Array.isArray(list)) {
+            setAvailableStudents(
+              list.map((s: { id: string; name: string; nim: string }) => ({
+                id: s.id,
+                name: s.name,
+                nim: s.nim,
+              }))
+            );
+          }
+        })
+        .catch(console.error)
+        .finally(() => {
+          if (isMounted) setStudentsLoading(false);
+        });
+    }
+    return () => {
+      isMounted = false;
+    };
+  }, [createModalOpen, isStudent]);
+
+  // Computed stats: uses server aggregate apiStats when available, falls back to loaded list
+  const studentTotal = apiStats ? apiStats.total : applications.length;
+  const studentActiveCount = apiStats
+    ? apiStats.active
+    : applications.filter((a) =>
         ["APPLIED", "SCREENING", "INTERVIEW"].includes(a.status)
-      ).length,
-    [applications]
-  );
-  const studentSelectedCount = useMemo(
-    () => applications.filter((a) => a.status === "SELECTED").length,
-    [applications]
-  );
-  const studentRejectedCount = useMemo(
-    () =>
-      applications.filter((a) =>
+      ).length;
+  const studentSelectedCount = apiStats
+    ? apiStats.selected
+    : applications.filter((a) => a.status === "SELECTED").length;
+  const studentRejectedCount = apiStats
+    ? apiStats.closed
+    : applications.filter((a) =>
         ["REJECTED", "WITHDRAWN"].includes(a.status)
-      ).length,
-    [applications]
-  );
+      ).length;
 
   // Counts for Staff view
-  const staffScreeningCount = useMemo(
-    () => applications.filter((a) => a.status === "SCREENING").length,
-    [applications]
-  );
-  const staffInterviewCount = useMemo(
-    () => applications.filter((a) => a.status === "INTERVIEW").length,
-    [applications]
-  );
-  const staffSelectedCount = useMemo(
-    () => applications.filter((a) => a.status === "SELECTED").length,
-    [applications]
-  );
-  const staffClosedCount = useMemo(
-    () =>
-      applications.filter((a) =>
+  const staffTotal = apiStats ? apiStats.total : applications.length;
+  const staffScreeningCount = apiStats
+    ? apiStats.screening
+    : applications.filter((a) => a.status === "SCREENING").length;
+  const staffInterviewCount = apiStats
+    ? apiStats.interview
+    : applications.filter((a) => a.status === "INTERVIEW").length;
+  const staffSelectedCount = apiStats
+    ? apiStats.selected
+    : applications.filter((a) => a.status === "SELECTED").length;
+  const staffClosedCount = apiStats
+    ? apiStats.closed
+    : applications.filter((a) =>
         ["REJECTED", "WITHDRAWN"].includes(a.status)
-      ).length,
-    [applications]
-  );
+      ).length;
 
   // Handle Student Withdraw
   const handleConfirmWithdraw = async () => {
@@ -412,7 +502,7 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
         >
           <StatCard
             label="Total Lamaran"
-            value={String(applications.length)}
+            value={String(studentTotal)}
             description="Riwayat seluruh lamaran yang diajukan"
             icon={FileText}
             tone="navy"
@@ -446,7 +536,7 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
         >
           <StatCard
             label="Total Lamaran"
-            value={String(applications.length)}
+            value={String(staffTotal)}
             description="Semua lamaran yang masuk"
             icon={FileText}
             tone="navy"
@@ -508,7 +598,10 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
             <select
               id="application-status-filter"
               value={statusFilter}
-              onChange={(e) => setStatusFilter(e.target.value)}
+              onChange={(e) => {
+                setStatusFilter(e.target.value);
+                setPage(1);
+              }}
               className="rounded-lg border border-slate-300 bg-white py-2 pl-3 pr-8 text-sm text-slate-700 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
             >
               <option value="ALL">Semua Status</option>
@@ -524,7 +617,9 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
             <button
               onClick={() => {
                 setSearchQuery("");
+                setDebouncedSearchQuery("");
                 setStatusFilter("ALL");
+                setPage(1);
               }}
               className="inline-flex items-center gap-1 text-xs font-semibold text-slate-500 hover:text-slate-800"
             >
@@ -584,7 +679,7 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
               Coba Lagi
             </button>
           </div>
-        ) : filteredApplications.length === 0 ? (
+        ) : applications.length === 0 ? (
           <div
             data-testid="empty-state"
             className="flex min-h-[300px] flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-8 text-center shadow-sm"
@@ -615,7 +710,7 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredApplications.map((app) => (
+                  {applications.map((app) => (
                     <tr key={app.id} className="hover:bg-slate-50/70">
                       {/* Candidate info (Staff only) */}
                       {!isStudent && (
@@ -776,6 +871,33 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
                 </tbody>
               </table>
             </div>
+
+            {/* Pagination Controls */}
+            {total > 0 && (
+              <div className="flex items-center justify-between border-t border-slate-200 bg-white px-5 py-4">
+                <span className="text-xs text-slate-500">
+                  Halaman {page} dari {totalPages} ({total} lamaran)
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1 || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Sebelumnya
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Berikutnya
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
@@ -914,35 +1036,59 @@ export function ApplicationsPage({ userRole = "" }: ApplicationsPageProps) {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700">
-                  ID Lowongan (Vacancy ID) *
+                  Lowongan *
                 </label>
-                <input
-                  type="text"
+                <select
                   id="create-application-vacancy-id"
                   value={createVacancyId}
                   onChange={(e) => setCreateVacancyId(e.target.value)}
-                  placeholder="Contoh: cm8..."
-                  className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
+                  className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50] disabled:bg-slate-50 disabled:text-slate-500"
                   required
-                />
+                  disabled={vacanciesLoading || createLoading}
+                >
+                  <option value="" disabled>Pilih Lowongan</option>
+                  {availableVacancies.map((v) => (
+                    <option key={v.id} value={v.id}>
+                      {v.title} — {v.employer?.name || "Perusahaan"}
+                    </option>
+                  ))}
+                </select>
+                {vacanciesLoading && (
+                  <p className="mt-1 text-[11px] text-slate-500 flex items-center gap-1">
+                    <Loader2 className="size-3 animate-spin" /> Memuat daftar lowongan...
+                  </p>
+                )}
               </div>
 
               {!isStudent && (
                 <div>
                   <label className="block text-xs font-semibold text-slate-700">
-                    ID Peserta (Student ID) *
+                    Peserta (Student) *
                   </label>
-                  <input
-                    type="text"
+                  <select
                     id="create-application-student-id"
                     value={createStudentId}
                     onChange={(e) => setCreateStudentId(e.target.value)}
-                    placeholder="Contoh: cm8..."
-                    className="mt-1.5 w-full rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-800 placeholder:text-slate-400 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50]"
+                    className="mt-1.5 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-800 focus:border-[#102f50] focus:outline-none focus:ring-1 focus:ring-[#102f50] disabled:bg-slate-50 disabled:text-slate-500"
                     required
-                  />
+                    disabled={studentsLoading || createLoading}
+                  >
+                    <option value="" disabled>
+                      Pilih Peserta
+                    </option>
+                    {availableStudents.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        {s.name} ({s.nim})
+                      </option>
+                    ))}
+                  </select>
+                  {studentsLoading && (
+                    <p className="mt-1 text-[11px] text-slate-500 flex items-center gap-1">
+                      <Loader2 className="size-3 animate-spin" /> Memuat daftar peserta...
+                    </p>
+                  )}
                   <p className="mt-1 text-[11px] text-slate-400">
-                    Wajib diisi saat staf membuat lamaran untuk peserta.
+                    Pilih peserta yang akan diajukan ke lowongan kerja ini.
                   </p>
                 </div>
               )}

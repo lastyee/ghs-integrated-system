@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { AlertCircle, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { SoftDeleteAction } from "@/components/common/soft-delete-action";
 
 export type StudentItem = {
@@ -38,6 +38,10 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [editingStudent, setEditingStudent] = useState<StudentItem | null>(null);
   const [form, setForm] = useState<FormValues>(emptyForm);
@@ -52,8 +56,27 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
   const canDelete = ["SUPER_ADMIN", "ADMIN"].includes(userRole);
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      if (query !== debouncedQuery) {
+        setDebouncedQuery(query);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [query, debouncedQuery]);
+
+  useEffect(() => {
     let isMounted = true;
-    fetch("/api/students")
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: "20",
+      ...(debouncedQuery ? { search: debouncedQuery } : {}),
+    });
+
+    fetch(`/api/students?${params.toString()}`)
       .then(async (res) => {
         if (!res.ok) {
           const payload = await res.json().catch(() => null);
@@ -64,6 +87,8 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
       .then((json) => {
         if (isMounted) {
           setStudents(json.data || []);
+          setTotal(json.pagination?.total || 0);
+          setTotalPages(json.pagination?.totalPages || 1);
           setError(null);
           setLoading(false);
         }
@@ -78,22 +103,11 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
     return () => {
       isMounted = false;
     };
-  }, [refreshTrigger]);
+  }, [refreshTrigger, page, debouncedQuery]);
 
   const reloadStudents = () => {
-    setLoading(true);
     setRefreshTrigger((prev) => prev + 1);
   };
-
-  const filteredStudents = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return students;
-    return students.filter((s) =>
-      [s.nim, s.name, s.nik || "", s.phone || "", s.address || ""].some((val) =>
-        val.toLowerCase().includes(q)
-      )
-    );
-  }, [students, query]);
 
   const openCreate = () => {
     setForm(emptyForm);
@@ -216,24 +230,24 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
         </div>
       )}
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-          <label className="block flex-1">
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Cari Peserta</span>
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <label className="block min-w-0 flex-[1_1_100%] sm:flex-[2_1_250px]">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cari Peserta</span>
             <span className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Cari nama, NIM, NIK, atau telepon..."
-                className="h-10 w-full rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-[#123b63]"
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 bg-white pl-9 pr-3 text-sm outline-none focus:border-[#123b63]"
               />
             </span>
           </label>
           <button
             type="button"
             onClick={() => setQuery("")}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
           >
             <RotateCcw className="size-4" />
             Reset
@@ -245,7 +259,7 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
         <div className="border-b border-slate-100 px-5 py-4">
           <h2 className="font-bold text-[#102f50]">Daftar Peserta</h2>
           <p className="mt-1 text-xs text-slate-500">
-            {loading ? "Memuat data..." : `${filteredStudents.length} peserta terdaftar`}
+            {loading ? "Memuat data..." : `Menampilkan ${students.length} dari ${total} peserta`}
           </p>
         </div>
 
@@ -266,9 +280,9 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
               Coba Lagi
             </button>
           </div>
-        ) : filteredStudents.length === 0 ? (
+        ) : students.length === 0 ? (
           <div data-testid="empty-state" className="px-5 py-12 text-center text-sm text-slate-500">
-            Belum ada data peserta yang terdaftar.
+            Belum ada data peserta yang terdaftar atau ditemukan.
           </div>
         ) : (
           <>
@@ -287,7 +301,7 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredStudents.map((student) => (
+                  {students.map((student) => (
                     <tr key={student.id}>
                       <td className="px-5 py-4 font-semibold text-[#123b63]">{student.nim}</td>
                       <td className="px-5 py-4 font-semibold text-[#102f50]">{student.name}</td>
@@ -351,7 +365,7 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
             </div>
 
             <div className="divide-y divide-slate-100 md:hidden">
-              {filteredStudents.map((student) => (
+              {students.map((student) => (
                 <article key={student.id} className="p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -409,6 +423,32 @@ export function StudentsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string; 
                 </article>
               ))}
             </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+                <span className="text-sm text-slate-500">
+                  Halaman {page} dari {totalPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1 || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Sebelumnya
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Berikutnya
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </section>

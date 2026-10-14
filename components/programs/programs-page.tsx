@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { AlertCircle, Edit3, Eye, Loader2, Plus, RotateCcw, Search, X } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 import { useToast } from "@/components/common/toast-provider";
 
@@ -33,6 +33,10 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [form, setForm] = useState<FormValues>(emptyForm);
   const [editingProgram, setEditingProgram] = useState<ProgramItem | null>(null);
@@ -49,8 +53,27 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
   const canDelete = ["SUPER_ADMIN", "ADMIN"].includes(userRole);
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      if (query !== debouncedQuery) {
+        setDebouncedQuery(query);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [query, debouncedQuery]);
+
+  useEffect(() => {
     let isMounted = true;
-    fetch("/api/programs")
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setLoading(true);
+
+    const params = new URLSearchParams({
+      page: page.toString(),
+      limit: "20",
+      ...(debouncedQuery ? { search: debouncedQuery } : {}),
+    });
+
+    fetch(`/api/programs?${params.toString()}`)
       .then(async (res) => {
         if (!res.ok) {
           const payload = await res.json().catch(() => null);
@@ -61,6 +84,8 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
       .then((json) => {
         if (isMounted) {
           setPrograms(json.data || []);
+          setTotal(json.pagination?.total || 0);
+          setTotalPages(json.pagination?.totalPages || 1);
           setError(null);
           setLoading(false);
         }
@@ -76,10 +101,9 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
     return () => {
       isMounted = false;
     };
-  }, [refreshTrigger]);
+  }, [refreshTrigger, page, debouncedQuery]);
 
   const reloadPrograms = () => {
-    setLoading(true);
     setRefreshTrigger((prev) => prev + 1);
   };
 
@@ -102,14 +126,6 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
       setDeletePending(false);
     }
   };
-
-  const filtered = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    if (!q) return programs;
-    return programs.filter((p) =>
-      `${p.code} ${p.name} ${p.description || ""}`.toLowerCase().includes(q)
-    );
-  }, [programs, query]);
 
   const openCreate = () => {
     setForm(emptyForm);
@@ -225,24 +241,24 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
         </div>
       )}
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-end">
-          <label className="block flex-1">
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Cari Program</span>
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-end">
+          <label className="block min-w-0 flex-[1_1_100%] sm:flex-[2_1_250px]">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cari Program</span>
             <span className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Cari kode atau nama program..."
-                className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm outline-none focus:border-[#123b63]"
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 pl-9 pr-3 text-sm outline-none focus:border-[#123b63]"
               />
             </span>
           </label>
           <button
             type="button"
             onClick={() => setQuery("")}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
           >
             <RotateCcw className="size-4" />
             Reset
@@ -254,7 +270,7 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
         <div className="border-b border-slate-100 px-5 py-4">
           <h2 className="font-bold text-[#102f50]">Daftar Program</h2>
           <p className="mt-1 text-xs text-slate-500">
-            {loading ? "Memuat data..." : `${filtered.length} program terdaftar`}
+            {loading ? "Memuat data..." : `Menampilkan ${programs.length} dari ${total} program`}
           </p>
         </div>
 
@@ -275,7 +291,7 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
               Coba Lagi
             </button>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : programs.length === 0 ? (
           <div data-testid="empty-state" className="px-5 py-12 text-center text-sm text-slate-500">
             Belum ada data program yang terdaftar.
           </div>
@@ -293,7 +309,7 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map((program) => (
+                  {programs.map((program) => (
                     <tr key={program.id}>
                       <td className="px-5 py-4 font-semibold text-[#123b63]">{program.code}</td>
                       <td className="px-5 py-4 font-semibold text-[#102f50]">{program.name}</td>
@@ -345,7 +361,7 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
             </div>
 
             <div className="divide-y divide-slate-100 md:hidden">
-              {filtered.map((program) => (
+              {programs.map((program) => (
                 <article key={program.id} className="p-5">
                   <div className="flex items-start justify-between gap-3">
                     <div>
@@ -386,6 +402,32 @@ export function ProgramsPage({ userRole = "SUPER_ADMIN" }: { userRole?: string }
                 </article>
               ))}
             </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+                <span className="text-sm text-slate-500">
+                  Halaman {page} dari {totalPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1 || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Sebelumnya
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Berikutnya
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </section>

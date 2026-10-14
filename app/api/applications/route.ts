@@ -127,10 +127,22 @@ export async function GET(request: Request) {
     const authenticatedUser = await requirePermission("application:read");
     const { searchParams } = new URL(request.url);
 
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search")?.trim() || "";
+
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(100, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const rawStudentId = searchParams.get("studentId");
+    const rawVacancyId = searchParams.get("vacancyId");
+    const rawStatus = searchParams.get("status");
+
     const queryInput = {
-      studentId: searchParams.get("studentId") || undefined,
-      vacancyId: searchParams.get("vacancyId") || undefined,
-      status: searchParams.get("status") || undefined,
+      studentId: rawStudentId && rawStudentId !== "ALL" ? rawStudentId : undefined,
+      vacancyId: rawVacancyId && rawVacancyId !== "ALL" ? rawVacancyId : undefined,
+      status: rawStatus && rawStatus !== "ALL" ? rawStatus : undefined,
     };
 
     const parsedQuery = applicationQuerySchema.safeParse(queryInput);
@@ -146,7 +158,7 @@ export async function GET(request: Request) {
 
     const { studentId: queryStudentId, vacancyId, status } = parsedQuery.data;
 
-    const where: Prisma.ApplicationWhereInput = {
+    const baseWhere: Prisma.ApplicationWhereInput = {
       deletedAt: null,
       student: { deletedAt: null },
       vacancy: { deletedAt: null, employer: { deletedAt: null } },
@@ -167,30 +179,121 @@ export async function GET(request: Request) {
         throw new ForbiddenError("Students cannot access applications of other students.");
       }
 
-      where.studentId = student.id;
+      baseWhere.studentId = student.id;
     } else {
       if (queryStudentId) {
-        where.studentId = queryStudentId;
+        baseWhere.studentId = queryStudentId;
       }
     }
 
     if (vacancyId) {
-      where.vacancyId = vacancyId;
+      baseWhere.vacancyId = vacancyId;
     }
+
+    const statsWhere: Prisma.ApplicationWhereInput = {
+      ...baseWhere,
+    };
 
     if (status) {
-      where.status = status;
+      baseWhere.status = status;
     }
 
-    const applications = await prisma.application.findMany({
-      where,
-      select: applicationListSelect,
-      orderBy: {
-        createdAt: "desc",
-      },
-    });
+    const searchWhere: Prisma.ApplicationWhereInput = searchStr
+      ? {
+          OR: [
+            { notes: { contains: searchStr, mode: "insensitive" as const } },
+            { student: { name: { contains: searchStr, mode: "insensitive" as const } } },
+            { student: { nim: { contains: searchStr, mode: "insensitive" as const } } },
+            { vacancy: { title: { contains: searchStr, mode: "insensitive" as const } } },
+            { vacancy: { employer: { name: { contains: searchStr, mode: "insensitive" as const } } } },
+          ],
+        }
+      : {};
 
-    return Response.json(applications, { status: 200 });
+    const where: Prisma.ApplicationWhereInput = {
+      ...baseWhere,
+      ...searchWhere,
+    };
+
+    const [
+      applications,
+      total,
+      totalStats,
+      activeStats,
+      appliedStats,
+      screeningStats,
+      interviewStats,
+      selectedStats,
+      closedStats,
+      placementStats,
+    ] = await prisma.$transaction([
+      prisma.application.findMany({
+        where,
+        skip,
+        take: limit,
+        select: applicationListSelect,
+        orderBy: {
+          createdAt: "desc",
+        },
+      }),
+      prisma.application.count({ where }),
+      prisma.application.count({ where: statsWhere }),
+      prisma.application.count({
+        where: {
+          ...statsWhere,
+          status: { in: ["APPLIED", "SCREENING", "INTERVIEW"] },
+        },
+      }),
+      prisma.application.count({
+        where: { ...statsWhere, status: "APPLIED" },
+      }),
+      prisma.application.count({
+        where: { ...statsWhere, status: "SCREENING" },
+      }),
+      prisma.application.count({
+        where: { ...statsWhere, status: "INTERVIEW" },
+      }),
+      prisma.application.count({
+        where: { ...statsWhere, status: "SELECTED" },
+      }),
+      prisma.application.count({
+        where: {
+          ...statsWhere,
+          status: { in: ["REJECTED", "WITHDRAWN"] },
+        },
+      }),
+      prisma.application.count({
+        where: {
+          ...statsWhere,
+          placement: { isNot: null, is: { deletedAt: null } },
+        },
+      }),
+    ]);
+
+    const totalPages = Math.ceil(total / limit) || 1;
+
+    return Response.json(
+      {
+        data: applications,
+        pagination: {
+          page,
+          limit,
+          total,
+          totalPages,
+        },
+        stats: {
+          total: totalStats,
+          active: activeStats,
+          applied: appliedStats,
+          screening: screeningStats,
+          interview: interviewStats,
+          selected: selectedStats,
+          closed: closedStats,
+          placement: placementStats,
+        },
+      },
+      { status: 200 }
+    );
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

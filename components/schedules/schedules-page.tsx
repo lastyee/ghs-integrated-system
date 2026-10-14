@@ -4,6 +4,8 @@ import Link from "next/link";
 import {
   AlertCircle,
   CalendarDays,
+  ChevronDown,
+  ChevronRight,
   Clock,
   Filter,
   Loader2,
@@ -59,6 +61,7 @@ export interface ApiSchedule {
 export interface ApiClass {
   id: string;
   name: string;
+  batch?: { name: string };
 }
 
 export interface ApiSubject {
@@ -98,19 +101,37 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
   const [authErrorStatus, setAuthErrorStatus] = useState<401 | 403 | null>(null);
 
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [status, setStatus] = useState<string>("ALL");
   const [date, setDate] = useState("ALL");
   const [batch, setBatch] = useState("ALL");
   const [subject, setSubject] = useState("ALL");
   const [instructor, setInstructor] = useState("ALL");
+
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [stats, setStats] = useState({
+    totalSchedules: 0,
+    ghi07Count: 0,
+    ghi08Count: 0,
+    scheduledCount: 0,
+  });
+  const [filterDates, setFilterDates] = useState<string[]>([]);
+  const [filterBatches, setFilterBatches] = useState<string[]>([]);
+  const [filterSubjects, setFilterSubjects] = useState<string[]>([]);
+  const [filterInstructors, setFilterInstructors] = useState<string[]>([]);
   const [openMenu, setOpenMenu] = useState<string | null>(null);
+
+  const [expandedDays, setExpandedDays] = useState<Record<string, boolean>>({});
+  const [hasInitializedExpand, setHasInitializedExpand] = useState(false);
 
   const [reloadKey, setReloadKey] = useState(0);
 
   const [classes, setClasses] = useState<ApiClass[]>([]);
   const [subjects, setSubjects] = useState<ApiSubject[]>([]);
   const [instructorsList, setInstructorsList] = useState<ApiInstructor[]>([]);
-  
+
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [form, setForm] = useState({
@@ -140,12 +161,35 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
   };
 
   useEffect(() => {
+    const handler = setTimeout(() => {
+      if (query !== debouncedQuery) {
+        setDebouncedQuery(query);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [query, debouncedQuery]);
+
+  useEffect(() => {
     let ignore = false;
 
     async function loadSchedules() {
+      setLoading(true);
+
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: "20",
+        ...(debouncedQuery ? { search: debouncedQuery } : {}),
+        ...(status !== "ALL" ? { status } : {}),
+        ...(date !== "ALL" ? { date } : {}),
+        ...(batch !== "ALL" ? { batch } : {}),
+        ...(subject !== "ALL" ? { subject } : {}),
+        ...(instructor !== "ALL" ? { instructor } : {}),
+      });
+
       try {
         const [res, clsRes, subRes, insRes] = await Promise.all([
-          fetch("/api/schedules", { headers: { Accept: "application/json" } }),
+          fetch(`/api/schedules?${params.toString()}`, { headers: { Accept: "application/json" } }),
           fetch("/api/classes"),
           fetch("/api/subjects"),
           fetch("/api/instructors"),
@@ -173,6 +217,20 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
 
         if (ignore) return;
         setSchedules(Array.isArray(json.data) ? json.data : []);
+        setTotal(json.pagination?.total || 0);
+        setTotalPages(json.pagination?.totalPages || 1);
+        setStats(
+          json.stats || {
+            totalSchedules: 0,
+            ghi07Count: 0,
+            ghi08Count: 0,
+            scheduledCount: 0,
+          }
+        );
+        setFilterDates(["ALL", ...(json.filterOptions?.dates || [])]);
+        setFilterBatches(["ALL", ...(json.filterOptions?.batches || [])]);
+        setFilterSubjects(["ALL", ...(json.filterOptions?.subjects || [])]);
+        setFilterInstructors(["ALL", ...(json.filterOptions?.instructors || [])]);
         setClasses(clsJson.data || []);
         setSubjects(subJson.data || []);
         setInstructorsList(insJson.data || []);
@@ -191,57 +249,59 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
     return () => {
       ignore = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, page, debouncedQuery, status, date, batch, subject, instructor]);
 
   const options = useMemo(() => {
-    const dates = ["ALL", ...new Set(schedules.map((s) => s.date.substring(0, 10)).sort())];
-    const batches = ["ALL", ...new Set(schedules.map((s) => s.class?.batch?.name).filter(Boolean).sort())];
-    const subjects = ["ALL", ...new Set(schedules.map((s) => s.subject?.name).filter(Boolean).sort())];
-    const instructors = ["ALL", ...new Set(schedules.map((s) => s.instructor?.name).filter(Boolean).sort())];
-    return { dates, batches, subjects, instructors };
+    return { dates: filterDates, batches: filterBatches, subjects: filterSubjects, instructors: filterInstructors };
+  }, [filterDates, filterBatches, filterSubjects, filterInstructors]);
+
+  const groupedByDay = useMemo(() => {
+    const groups: Record<string, ApiSchedule[]> = {
+      "SENIN": [],
+      "SELASA": [],
+      "RABU": [],
+      "KAMIS": [],
+      "JUMAT": [],
+      "SABTU": [],
+      "MINGGU": []
+    };
+
+    const sortedFiltered = [...schedules].sort((a, b) => {
+      const dateA = a.date.substring(0, 10);
+      const dateB = b.date.substring(0, 10);
+      if (dateA !== dateB) return dateA.localeCompare(dateB);
+      if (a.startTime !== b.startTime) return a.startTime.localeCompare(b.startTime);
+      return 0;
+    });
+
+    for (const item of sortedFiltered) {
+      const dayName = getUtcDayName(item.date);
+      if (groups[dayName]) {
+        groups[dayName].push(item);
+      } else {
+        groups[dayName] = [item];
+      }
+    }
+
+    for (const key of Object.keys(groups)) {
+      if (groups[key].length === 0) {
+        delete groups[key];
+      }
+    }
+
+    return groups;
   }, [schedules]);
 
-  const filtered = useMemo(() => {
-    return schedules.filter((item) => {
-      const q = query.trim().toLowerCase();
-      const itemDate = item.date.substring(0, 10);
-      const batchName = item.class?.batch?.name || "";
-      const subjectName = item.subject?.name || "";
-      const instructorName = item.instructor?.name || "";
-      const roomName = item.room || "";
-      const dressCode = item.dressCode || "";
-      const topic = item.topic || "";
-
-      const matchQuery =
-        !q ||
-        `${subjectName} ${instructorName} ${batchName} ${roomName} ${dressCode} ${topic}`
-          .toLowerCase()
-          .includes(q);
-
-      const matchStatus = status === "ALL" || item.status === status;
-      const matchDate = date === "ALL" || itemDate === date;
-      const matchBatch = batch === "ALL" || batchName === batch;
-      const matchSubject = subject === "ALL" || subjectName === subject;
-      const matchInstructor = instructor === "ALL" || instructorName === instructor;
-
-      return matchQuery && matchStatus && matchDate && matchBatch && matchSubject && matchInstructor;
-    });
-  }, [batch, date, instructor, query, schedules, status, subject]);
-
-  const grouped = useMemo(() => {
-    const groups: Record<string, ApiSchedule[]> = {};
-    for (const item of filtered) {
-      const itemDate = item.date.substring(0, 10);
-      if (!groups[itemDate]) groups[itemDate] = [];
-      groups[itemDate].push(item);
+  useEffect(() => {
+    if (!loading && schedules.length > 0 && !hasInitializedExpand) {
+      const firstDay = Object.keys(groupedByDay)[0];
+      if (firstDay) {
+        // eslint-disable-next-line react-hooks/set-state-in-effect
+        setExpandedDays({ [firstDay]: true });
+      }
+      setHasInitializedExpand(true);
     }
-    return groups;
-  }, [filtered]);
-
-  const totalSchedules = schedules.length;
-  const ghi07Count = schedules.filter((s) => s.class?.batch?.name === "GHI-07").length;
-  const ghi08Count = schedules.filter((s) => s.class?.batch?.name === "GHI-08").length;
-  const scheduledCount = schedules.filter((s) => s.status === "SCHEDULED").length;
+  }, [loading, schedules.length, groupedByDay, hasInitializedExpand]);
 
   const resetFilters = () => {
     setQuery("");
@@ -250,6 +310,7 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
     setBatch("ALL");
     setSubject("ALL");
     setInstructor("ALL");
+    setPage(1);
   };
 
   const openCreate = () => {
@@ -277,7 +338,7 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
       const d = new Date(utcIso);
       return d.toTimeString().substring(0, 5);
     };
-    
+
     setForm({
       classId: s.classId,
       subjectId: s.subjectId,
@@ -411,28 +472,28 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Statistik jadwal">
         <StatCard
           label="Total Jadwal"
-          value={String(totalSchedules)}
+          value={String(stats.totalSchedules)}
           description="Sesi resmi terdaftar"
           icon={CalendarDays}
           tone="navy"
         />
         <StatCard
           label="Batch GHI-07"
-          value={String(ghi07Count)}
+          value={String(stats.ghi07Count)}
           description="Sesi training GHI-07"
           icon={Users}
           tone="red"
         />
         <StatCard
           label="Batch GHI-08"
-          value={String(ghi08Count)}
+          value={String(stats.ghi08Count)}
           description="Sesi training GHI-08"
           icon={Users}
           tone="yellow"
         />
         <StatCard
           label="Status Scheduled"
-          value={String(scheduledCount)}
+          value={String(stats.scheduledCount)}
           description="Jadwal aktif mendatang"
           icon={Clock}
           tone="blue"
@@ -440,34 +501,34 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
       </section>
 
       {/* Filter Bar */}
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.2fr)_repeat(5,minmax(130px,0.8fr))_auto] xl:items-end">
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] xl:items-end">
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Cari Jadwal</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cari Jadwal</span>
             <span className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Subject / instructor / room / batch..."
-                className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#102f50] focus:outline-none"
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#102f50] focus:outline-none"
               />
             </span>
           </label>
-          <FilterSelect label="Tanggal" value={date} onChange={setDate} options={options.dates} />
-          <FilterSelect label="Batch" value={batch} onChange={setBatch} options={options.batches} />
-          <FilterSelect label="Subject" value={subject} onChange={setSubject} options={options.subjects} />
-          <FilterSelect label="Instructor" value={instructor} onChange={setInstructor} options={options.instructors} />
+          <FilterSelect label="Tanggal" value={date} onChange={(v) => { setDate(v); setPage(1); }} options={options.dates} />
+          <FilterSelect label="Batch" value={batch} onChange={(v) => { setBatch(v); setPage(1); }} options={options.batches} />
+          <FilterSelect label="Subject" value={subject} onChange={(v) => { setSubject(v); setPage(1); }} options={options.subjects} />
+          <FilterSelect label="Instructor" value={instructor} onChange={(v) => { setInstructor(v); setPage(1); }} options={options.instructors} />
           <FilterSelect
             label="Status"
             value={status}
-            onChange={setStatus}
+            onChange={(v) => { setStatus(v); setPage(1); }}
             options={["ALL", "SCHEDULED", "COMPLETED", "CANCELLED"]}
           />
           <button
             type="button"
             onClick={resetFilters}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
           >
             <RotateCcw className="size-4" />
             Reset
@@ -482,7 +543,7 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
           <p className="mt-1 text-xs text-slate-500">
             {loading
               ? "Memuat data dari database..."
-              : `${filtered.length} dari ${schedules.length} jadwal terdaftar`}
+              : `Menampilkan ${schedules.length} dari ${total} jadwal terdaftar`}
           </p>
         </div>
 
@@ -541,62 +602,119 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
         )}
 
         {/* 4. Empty State */}
-        {!loading && !error && filtered.length === 0 && (
+        {!loading && !error && schedules.length === 0 && (
           <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
             <div className="rounded-full bg-slate-100 p-3 text-slate-400">
               <Filter className="size-6" />
             </div>
             <h3 className="mt-3 text-base font-bold text-[#102f50]">Tidak Ada Jadwal</h3>
             <p className="mt-1 max-w-md text-xs text-slate-500">
-              {schedules.length === 0
-                ? "Belum ada jadwal yang terdaftar di sistem."
-                : "Tidak ada jadwal yang sesuai dengan filter pencarian saat ini."}
+              Tidak ada jadwal yang sesuai dengan filter pencarian saat ini.
             </p>
-            {schedules.length > 0 && (
-              <button
-                type="button"
-                onClick={resetFilters}
-                className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
-              >
-                Reset Filter
-              </button>
-            )}
+            <button
+              type="button"
+              onClick={resetFilters}
+              className="mt-4 inline-flex items-center gap-2 rounded-lg border border-slate-200 px-4 py-2 text-xs font-semibold text-slate-700 hover:bg-slate-50"
+            >
+              Reset Filter
+            </button>
           </div>
         )}
 
         {/* 5. Successful Data */}
-        {!loading && !error && filtered.length > 0 && (
-          <div className="divide-y divide-slate-100">
-            {Object.entries(grouped).map(([groupDate, items]) => {
-              const dayName = getUtcDayName(groupDate);
+        {!loading && !error && schedules.length > 0 && (
+          <div className="flex flex-col gap-4">
+            {Object.entries(groupedByDay).map(([dayName, items]) => {
+              const isExpanded = !!expandedDays[dayName];
+
               return (
-                <div key={groupDate}>
-                  <div className="flex items-center justify-between bg-slate-50/80 px-5 py-3">
+                <div key={dayName} className="rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
+                  <div
+                    className="flex cursor-pointer items-center justify-between bg-slate-50/80 px-5 py-4 transition-colors hover:bg-slate-100"
+                    onClick={() => setExpandedDays(prev => ({ ...prev, [dayName]: !prev[dayName] }))}
+                  >
                     <div>
-                      <p className="text-xs font-bold uppercase tracking-wide text-[#123b63]">{dayName}</p>
-                      <p className="mt-0.5 text-sm font-semibold text-[#102f50]">{groupDate}</p>
+                      <p className="font-bold uppercase tracking-wide text-[#123b63]">{dayName}</p>
                     </div>
-                    <span className="rounded-full bg-slate-200/80 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700">
-                      {items.length} sesi
-                    </span>
+                    <div className="flex items-center gap-3">
+                      <span className="rounded-full bg-slate-200/80 px-2.5 py-0.5 text-[11px] font-semibold text-slate-700">
+                        {items.length} sesi
+                      </span>
+                      {isExpanded ? (
+                        <ChevronDown className="size-5 text-slate-400" />
+                      ) : (
+                        <ChevronRight className="size-5 text-slate-400" />
+                      )}
+                    </div>
                   </div>
-                  <div className="divide-y divide-slate-100">
-                    {items.map((item) => (
-                      <ScheduleCard
-                        key={item.id}
-                        item={item}
-                        openMenu={openMenu}
-                        setOpenMenu={setOpenMenu}
-                        canMutate={canMutate}
-                        canDelete={canDelete}
-                        onEdit={() => openEdit(item)}
-                        onDeleted={handleReload}
-                      />
-                    ))}
-                  </div>
+                  {isExpanded && (
+                    <div className="border-t border-slate-100">
+                      {Object.entries(
+                        items.reduce((acc, curr) => {
+                          const d = curr.date.substring(0, 10);
+                          if (!acc[d]) acc[d] = [];
+                          acc[d].push(curr);
+                          return acc;
+                        }, {} as Record<string, typeof items>)
+                      ).map(([dateStr, schedulesOnDate]) => {
+                        const dateFormatted = new Date(dateStr).toLocaleDateString("id-ID", {
+                          day: "numeric",
+                          month: "long",
+                          year: "numeric"
+                        });
+                        return (
+                          <div key={dateStr} className="border-b border-slate-100 last:border-b-0">
+                            <div className="px-5 pb-2 pt-4">
+                              <p className="text-sm font-semibold text-[#102f50]">{dateFormatted}</p>
+                            </div>
+                            <div className="divide-y divide-slate-100">
+                              {schedulesOnDate.map((item) => (
+                                <ScheduleCard
+                                  key={item.id}
+                                  item={item}
+                                  openMenu={openMenu}
+                                  setOpenMenu={setOpenMenu}
+                                  canMutate={canMutate}
+                                  canDelete={canDelete}
+                                  onEdit={() => openEdit(item)}
+                                  onDeleted={handleReload}
+                                />
+                              ))}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
                 </div>
               );
             })}
+          </div>
+        )}
+
+        {!loading && !error && totalPages > 1 && (
+          <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+            <span className="text-sm text-slate-500">
+              Halaman {page} dari {totalPages}
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.max(1, p - 1))}
+                disabled={page === 1 || loading}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Sebelumnya
+              </button>
+              <button
+                type="button"
+                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                disabled={page === totalPages || loading}
+                className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+              >
+                Berikutnya
+              </button>
+            </div>
           </div>
         )}
       </section>
@@ -700,26 +818,37 @@ export function SchedulesPage({ userRole = "" }: { userRole?: string }) {
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700">Ruangan</label>
-                <input
-                  type="text"
+                <select
                   value={form.room}
                   onChange={(e) => setForm({ ...form, room: e.target.value })}
                   disabled={submitLoading}
-                  placeholder="Contoh: Room A"
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#102f50] focus:outline-none"
-                />
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-[#102f50] focus:outline-none"
+                >
+                  <option value="" disabled>Pilih Ruangan</option>
+                  <option value="RUANG KELAS">RUANG KELAS</option>
+                  <option value="OUTDOOR">OUTDOOR</option>
+                  {form.room && !["RUANG KELAS", "OUTDOOR"].includes(form.room) && (
+                    <option value={form.room}>{form.room} (Existing)</option>
+                  )}
+                </select>
               </div>
 
               <div>
                 <label className="block text-xs font-semibold text-slate-700">Seragam / Dress Code</label>
-                <input
-                  type="text"
+                <select
                   value={form.dressCode}
                   onChange={(e) => setForm({ ...form, dressCode: e.target.value })}
                   disabled={submitLoading}
-                  placeholder="Contoh: Formal / Batik"
-                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 px-3 text-sm focus:border-[#102f50] focus:outline-none"
-                />
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-[#102f50] focus:outline-none"
+                >
+                  <option value="" disabled>Pilih Seragam</option>
+                  <option value="FORMAL PAKAI JAS">FORMAL PAKAI JAS</option>
+                  <option value="FORMAL TANPA JAS">FORMAL TANPA JAS</option>
+                  <option value="POLO">POLO</option>
+                  {form.dressCode && !["FORMAL PAKAI JAS", "FORMAL TANPA JAS", "POLO"].includes(form.dressCode) && (
+                    <option value={form.dressCode}>{form.dressCode} (Existing)</option>
+                  )}
+                </select>
               </div>
 
               <div className="sm:col-span-2">
@@ -780,11 +909,11 @@ function FilterSelect({
 }) {
   return (
     <label>
-      <span className="mb-2 block text-xs font-semibold text-slate-600">{label}</span>
+      <span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-[#102f50] focus:outline-none"
+        className="h-10 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-[#102f50] focus:outline-none"
       >
         <option value="ALL">Semua {label}</option>
         {options
