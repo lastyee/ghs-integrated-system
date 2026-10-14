@@ -75,12 +75,20 @@ export async function GET(request: Request) {
         : await requirePermission("attendance:read");
     const { searchParams } = new URL(request.url);
 
+    const pageStr = searchParams.get("page");
+    const limitStr = searchParams.get("limit");
+    const searchStr = searchParams.get("search") || "";
     const queryScheduleId = searchParams.get("scheduleId");
+    const queryScheduleIds = searchParams.get("scheduleIds");
     const queryStudentId = searchParams.get("studentId");
     const queryStatus = searchParams.get("status");
     const queryAbsenceType = searchParams.get("absenceType");
 
-    const where: Prisma.AttendanceWhereInput = {
+    const page = Math.max(1, parseInt(pageStr || "1", 10) || 1);
+    const limit = Math.max(1, Math.min(1000, parseInt(limitStr || "20", 10) || 20));
+    const skip = (page - 1) * limit;
+
+    const baseWhere: Prisma.AttendanceWhereInput = {
       deletedAt: null,
       student: { deletedAt: null },
       schedule: {
@@ -109,13 +117,33 @@ export async function GET(request: Request) {
         throw new ForbiddenError();
       }
 
-      where.studentId = student.id;
+      baseWhere.studentId = student.id;
+      baseWhere.schedule = {
+        deletedAt: null,
+        class: {
+          deletedAt: null,
+          batch: {
+            deletedAt: null,
+            program: { deletedAt: null },
+            enrollments: {
+              some: {
+                studentId: student.id,
+                status: "ACTIVE",
+                deletedAt: null,
+              },
+            },
+          },
+          instructor: { deletedAt: null },
+        },
+        subject: { deletedAt: null },
+        instructor: { deletedAt: null },
+      };
     } else if (authenticatedUser.role === "INSTRUCTOR") {
       const instructor = await requireLinkedInstructor(authenticatedUser);
       if (queryScheduleId) {
         await requireInstructorScheduleAccess(authenticatedUser, queryScheduleId);
       }
-      where.schedule = {
+      baseWhere.schedule = {
         deletedAt: null,
         instructorId: instructor.id,
         class: {
@@ -128,33 +156,98 @@ export async function GET(request: Request) {
       };
     } else {
       if (queryStudentId) {
-        where.studentId = queryStudentId;
+        baseWhere.studentId = queryStudentId;
       }
     }
 
     if (queryScheduleId) {
-      where.scheduleId = queryScheduleId;
+      baseWhere.scheduleId = queryScheduleId;
+    } else if (searchParams.has("scheduleIds")) {
+      const ids = (queryScheduleIds || "")
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
+      baseWhere.scheduleId = { in: ids };
     }
 
     if (queryStatus && Object.values(AttendanceStatus).includes(queryStatus as AttendanceStatus)) {
-      where.status = queryStatus as AttendanceStatus;
+      baseWhere.status = queryStatus as AttendanceStatus;
     }
 
     if (queryAbsenceType && Object.values(AbsenceType).includes(queryAbsenceType as AbsenceType)) {
-      where.absenceType = queryAbsenceType as AbsenceType;
+      baseWhere.absenceType = queryAbsenceType as AbsenceType;
     }
 
-    const attendances = await prisma.attendance.findMany({
-      where,
-      select: attendanceSelect,
-      orderBy: [
-        { schedule: { date: "asc" } },
-        { schedule: { startTime: "asc" } },
-        { student: { name: "asc" } },
-      ],
-    });
+    const searchWhere: Prisma.AttendanceWhereInput = searchStr
+      ? {
+          OR: [
+            { student: { name: { contains: searchStr, mode: "insensitive" as const } } },
+            { student: { nim: { contains: searchStr, mode: "insensitive" as const } } },
+            { schedule: { subject: { name: { contains: searchStr, mode: "insensitive" as const } } } },
+            { schedule: { class: { batch: { name: { contains: searchStr, mode: "insensitive" as const } } } } },
+          ],
+        }
+      : {};
 
-    return Response.json({ data: attendances });
+    const where = { ...baseWhere, ...searchWhere };
+
+    const globalAttendanceWhere: Prisma.AttendanceWhereInput = {
+      deletedAt: null,
+      student: { deletedAt: null },
+      schedule: baseWhere.schedule,
+      ...(authenticatedUser.role === "STUDENT" && baseWhere.studentId
+        ? { studentId: baseWhere.studentId }
+        : {}),
+    };
+
+    const completedSchedulesWhere: Prisma.ScheduleWhereInput = {
+      ...baseWhere.schedule,
+      attendances: {
+        some: {
+          deletedAt: null,
+          ...(authenticatedUser.role === "STUDENT" && baseWhere.studentId
+            ? { studentId: baseWhere.studentId }
+            : {}),
+        },
+      },
+    };
+
+    const [attendances, total, totalSchedules, completedSchedules, globalTotalAttendances] =
+      await prisma.$transaction([
+        prisma.attendance.findMany({
+          where,
+          skip,
+          take: limit,
+          select: attendanceSelect,
+          orderBy: [
+            { schedule: { date: "asc" } },
+            { schedule: { startTime: "asc" } },
+            { student: { name: "asc" } },
+          ],
+        }),
+        prisma.attendance.count({ where }),
+        prisma.schedule.count({ where: baseWhere.schedule }),
+        prisma.schedule.count({ where: completedSchedulesWhere }),
+        prisma.attendance.count({ where: globalAttendanceWhere }),
+      ]);
+
+    const totalPages = Math.ceil(total / limit);
+
+    return Response.json({
+      data: attendances,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages,
+      },
+      stats: {
+        totalSchedules,
+        completedSchedules,
+        openSchedules: Math.max(0, totalSchedules - completedSchedules),
+        totalAttendances: globalTotalAttendances,
+      },
+    });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);

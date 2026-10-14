@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { AlertCircle, Eye, FileCheck2, MoreHorizontal, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
+import { AlertCircle, Eye, FileCheck2, MoreHorizontal, Plus, RotateCcw, Search, Trash2, X, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
@@ -58,7 +58,8 @@ type FormValues = {
   type: AssessmentType;
   classId: string;
   subjectId: string;
-  maxScore: number;
+  studentId: string;
+  maxScore: string;
   status: AssessmentSessionStatus;
 };
 
@@ -68,7 +69,8 @@ const emptyForm: FormValues = {
   type: AssessmentType.ASSIGNMENT,
   classId: "",
   subjectId: "",
-  maxScore: 100,
+  studentId: "",
+  maxScore: "",
   status: AssessmentSessionStatus.OPEN,
 };
 
@@ -95,15 +97,25 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
   const [unauthorized, setUnauthorized] = useState(false);
 
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [type, setType] = useState<"ALL" | AssessmentType>("ALL");
   const [subjectId, setSubjectId] = useState("ALL");
   const [classId, setClassId] = useState("ALL");
   const [status, setStatus] = useState<"ALL" | AssessmentSessionStatus>("ALL");
 
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [stats, setStats] = useState({
+    total: 0,
+    open: 0,
+    completed: 0,
+  });
+
   const [modal, setModal] = useState<"create" | "edit" | null>(null);
   const [form, setForm] = useState<FormValues>(emptyForm);
   const [editingId, setEditingId] = useState<string | null>(null);
-  const [errors, setErrors] = useState<Partial<Record<keyof FormValues, string>>>({});
+  const [errors, setErrors] = useState<Partial<Record<keyof FormValues | "general", string>>>({});
   const [openMenu, setOpenMenu] = useState<string | null>(null);
   const [notice, setNotice] = useState("");
   const [submitting, setSubmitting] = useState(false);
@@ -111,15 +123,47 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
 
+  const [allStudents, setAllStudents] = useState<Array<{ id: string; nim: string; name: string }>>([]);
+  const [allEnrollments, setAllEnrollments] = useState<Array<{ studentId: string; batchId: string }>>([]);
+  const [scoreModalOpen, setScoreModalOpen] = useState(false);
+  const [selectedAssessmentForScore, setSelectedAssessmentForScore] = useState<ApiAssessment | null>(null);
+  const [scoreForm, setScoreForm] = useState({ studentId: "", assessmentId: "", score: "", feedback: "" });
+  const [scoreErrors, setScoreErrors] = useState<Record<string, string>>({});
+  const [scoreSubmitting, setScoreSubmitting] = useState(false);
+  const [scoreNotice, setScoreNotice] = useState<string | null>(null);
+  const [scoreError, setScoreError] = useState<string | null>(null);
+
+  useEffect(() => {
+    const handler = setTimeout(() => {
+      if (query !== debouncedQuery) {
+        setDebouncedQuery(query);
+        setPage(1);
+      }
+    }, 500);
+    return () => clearTimeout(handler);
+  }, [query, debouncedQuery]);
+
   const fetchData = useCallback(async () => {
     setLoading(true);
     setError(null);
     setUnauthorized(false);
     try {
-      const [resAssessments, resClasses, resSubjects] = await Promise.all([
-        fetch("/api/assessments"),
+      const params = new URLSearchParams({
+        page: page.toString(),
+        limit: "20",
+        ...(debouncedQuery ? { search: debouncedQuery } : {}),
+        ...(type !== "ALL" ? { type } : {}),
+        ...(subjectId !== "ALL" ? { subjectId } : {}),
+        ...(classId !== "ALL" ? { classId } : {}),
+        ...(status !== "ALL" ? { status } : {}),
+      });
+
+      const [resAssessments, resClasses, resSubjects, resStudents, resEnrollments] = await Promise.all([
+        fetch(`/api/assessments?${params.toString()}`),
         fetch("/api/classes"),
         fetch("/api/subjects"),
+        fetch("/api/students?limit=100"),
+        fetch("/api/enrollments"),
       ]);
 
       if (resAssessments.status === 403) {
@@ -132,8 +176,25 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
         throw new Error(`Gagal memuat assessment (HTTP ${resAssessments.status})`);
       }
 
-      const assessmentsData = await resAssessments.json();
-      setAssessments(assessmentsData);
+      const assessmentsJson = await resAssessments.json();
+      const list = Array.isArray(assessmentsJson) ? assessmentsJson : (assessmentsJson.data || []);
+      setAssessments(list);
+
+      if (assessmentsJson.pagination) {
+        setTotal(assessmentsJson.pagination.total);
+        setTotalPages(assessmentsJson.pagination.totalPages);
+      } else {
+        setTotal(list.length);
+        setTotalPages(1);
+      }
+
+      if (assessmentsJson.stats) {
+        setStats({
+          total: assessmentsJson.stats.total ?? list.length,
+          open: assessmentsJson.stats.open ?? assessmentsJson.stats.active ?? 0,
+          completed: assessmentsJson.stats.completed ?? 0,
+        });
+      }
 
       if (resClasses.ok) {
         const classesData = await resClasses.json();
@@ -144,31 +205,27 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
         const subjectsData = await resSubjects.json();
         setSubjects(subjectsData.data || subjectsData || []);
       }
+      if (resStudents.ok) {
+        const d = await resStudents.json();
+        const list = (d.data || d || []).slice().sort((a: { name: string }, b: { name: string }) =>
+          a.name.localeCompare(b.name)
+        );
+        setAllStudents(list);
+      }
+      if (resEnrollments.ok) {
+        const d = await resEnrollments.json();
+        setAllEnrollments(d.data || d || []);
+      }
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Terjadi kesalahan saat memuat data.");
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [page, debouncedQuery, type, subjectId, classId, status]);
 
   useEffect(() => {
     fetchData();
   }, [fetchData]);
-
-  const filtered = useMemo(() => {
-    return assessments.filter((item) => {
-      const matchQuery =
-        !query.trim() ||
-        `${item.name} ${item.subject.name} ${item.class.name} ${item.class.batch.name} ${item.type}`
-          .toLowerCase()
-          .includes(query.toLowerCase());
-      const matchType = type === "ALL" || item.type === type;
-      const matchSubject = subjectId === "ALL" || item.subjectId === subjectId;
-      const matchClass = classId === "ALL" || item.classId === classId;
-      const matchStatus = status === "ALL" || item.status === status;
-      return matchQuery && matchType && matchSubject && matchClass && matchStatus;
-    });
-  }, [assessments, classId, query, status, subjectId, type]);
 
   const openCreate = () => {
     setForm(emptyForm);
@@ -184,7 +241,8 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
       type: item.type,
       classId: item.classId,
       subjectId: item.subjectId,
-      maxScore: item.maxScore,
+      studentId: "",
+      maxScore: String(item.maxScore),
       status: item.status,
     });
     setErrors({});
@@ -195,13 +253,15 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
 
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
-    const nextErrors: Partial<Record<keyof FormValues, string>> = {};
+    const nextErrors: Partial<Record<keyof FormValues | "general", string>> = {};
     if (!form.name.trim()) nextErrors.name = "Nama assessment wajib diisi.";
     if (!form.type) nextErrors.type = "Type wajib dipilih.";
-    if (!form.classId) nextErrors.classId = "Kelas wajib dipilih.";
+    if (modal === "create" && !form.studentId) nextErrors.studentId = "Peserta wajib dipilih.";
+    if (modal === "edit" && !form.classId) nextErrors.classId = "Kelas wajib dipilih.";
     if (!form.subjectId) nextErrors.subjectId = "Mata pelajaran wajib dipilih.";
-    if (!form.maxScore || form.maxScore <= 0) {
-      nextErrors.maxScore = "Nilai maksimum harus lebih besar dari 0.";
+    const numMaxScore = Number(form.maxScore);
+    if (!form.maxScore || Number.isNaN(numMaxScore) || numMaxScore <= 0) {
+      nextErrors.maxScore = "Nilai maksimum harus berupa angka lebih besar dari 0.";
     }
 
     setErrors(nextErrors);
@@ -219,7 +279,7 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
             name: form.name.trim(),
             description: form.description.trim() || null,
             type: form.type,
-            classId: form.classId,
+            studentId: form.studentId,
             subjectId: form.subjectId,
             maxScore: Number(form.maxScore),
             status: form.status,
@@ -228,6 +288,17 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
+          if (errData.errors) {
+            const fieldErrors: Partial<Record<keyof FormValues | "general", string>> = {};
+            for (const [key, val] of Object.entries(errData.errors)) {
+              if (Array.isArray(val) && val.length > 0) {
+                fieldErrors[key as keyof FormValues] = val[0];
+              }
+            }
+            if (errData.message) fieldErrors.general = errData.message;
+            setErrors(fieldErrors);
+            return;
+          }
           throw new Error(errData.message || "Gagal membuat assessment.");
         }
 
@@ -260,7 +331,7 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
     } catch (err: unknown) {
       setErrors((prev) => ({
         ...prev,
-        name: err instanceof Error ? err.message : "Gagal menyimpan data.",
+        general: err instanceof Error ? err.message : "Gagal menyimpan data.",
       }));
     } finally {
       setSubmitting(false);
@@ -297,6 +368,68 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
     }
   };
 
+  const availableStudentsForScore = useMemo(() => {
+    if (!scoreForm.assessmentId) return allStudents;
+    const a = selectedAssessmentForScore || assessments.find(x => x.id === scoreForm.assessmentId);
+    if (!a?.class?.batch?.id) return [];
+    const enrolledIds = new Set(allEnrollments.filter(e => e.batchId === a.class.batch.id).map(e => e.studentId));
+    return allStudents.filter(s => enrolledIds.has(s.id));
+  }, [scoreForm.assessmentId, selectedAssessmentForScore, assessments, allEnrollments, allStudents]);
+
+  const handleScoreSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const errs: Record<string, string> = {};
+    if (!scoreForm.studentId) errs.studentId = "Peserta wajib dipilih.";
+    if (!scoreForm.assessmentId) errs.assessmentId = "Assessment wajib dipilih.";
+
+    const selectedAssessment = selectedAssessmentForScore || assessments.find(a => a.id === scoreForm.assessmentId);
+    if (!scoreForm.score.trim()) {  errs.score = "Nilai wajib diisi.";
+    } else {
+      const numScore = Number(scoreForm.score);
+      if (!Number.isFinite(numScore)) {
+        errs.score = "Nilai harus berupa angka numerik.";
+      } else if (numScore < 0 || (selectedAssessment && numScore > selectedAssessment.maxScore)) {
+        errs.score = `Nilai harus antara 0 dan ${selectedAssessment?.maxScore || 100}.`;
+      }
+    }
+
+    if (Object.keys(errs).length > 0) {
+      setScoreErrors(errs);
+      return;
+    }
+
+    setScoreSubmitting(true);
+    setScoreError(null);
+    setScoreNotice(null);
+    setScoreErrors({});
+
+    try {
+      const res = await fetch(`/api/assessments/${scoreForm.assessmentId}/scores`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          studentId: scoreForm.studentId,
+          score: Number(scoreForm.score),
+          feedback: scoreForm.feedback.trim() || null,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.message || "Gagal menyimpan nilai. Mungkin nilai untuk peserta ini sudah ada.");
+      }
+
+      setScoreNotice("Nilai berhasil diberikan kepada peserta.");
+      setScoreForm({ studentId: "", assessmentId: "", score: "", feedback: "" });
+
+      await fetchData();
+    } catch (err: unknown) {
+      setScoreError(err instanceof Error ? err.message : "Gagal menyimpan nilai.");
+    } finally {
+      setScoreSubmitting(false);
+    }
+  };
+
   if (unauthorized) {
     return (
       <div className="mx-auto max-w-7xl p-4 sm:p-8">
@@ -311,9 +444,9 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
     );
   }
 
-  const totalCount = assessments.length;
-  const activeCount = assessments.filter((a) => a.status === "OPEN").length;
-  const completedCount = assessments.filter((a) => a.status === "COMPLETED").length;
+  const totalCount = stats.total;
+  const activeCount = stats.open;
+  const completedCount = stats.completed;
 
   return (
     <div className="mx-auto max-w-7xl p-4 sm:p-8">
@@ -359,30 +492,36 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
         />
       </section>
 
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(220px,1fr)_repeat(3,minmax(140px,.7fr))_auto] xl:items-end">
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 sm:p-5 shadow-sm">
+        <div className="grid gap-3 sm:grid-cols-2 md:grid-cols-3 xl:grid-cols-[2fr_1fr_1fr_1fr_auto] xl:items-end">
           <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Cari Assessment</span>
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cari Assessment</span>
             <span className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
                 placeholder="Cari nama, mata pelajaran, kelas..."
-                className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#102f50] focus:outline-none"
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#102f50] focus:outline-none"
               />
             </span>
           </label>
           <Select
             label="Type"
             value={type}
-            onChange={(v) => setType(v as "ALL" | AssessmentType)}
+            onChange={(v) => {
+              setType(v as "ALL" | AssessmentType);
+              setPage(1);
+            }}
             options={["ALL", ...types]}
           />
           <Select
             label="Subject"
             value={subjectId}
-            onChange={setSubjectId}
+            onChange={(v) => {
+              setSubjectId(v);
+              setPage(1);
+            }}
             options={[
               { value: "ALL", label: "Semua Subject" },
               ...subjects.map((s) => ({ value: s.id, label: s.name })),
@@ -391,7 +530,10 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
           <Select
             label="Class"
             value={classId}
-            onChange={setClassId}
+            onChange={(v) => {
+              setClassId(v);
+              setPage(1);
+            }}
             options={[
               { value: "ALL", label: "Semua Kelas" },
               ...classes.map((c) => ({ value: c.id, label: c.name })),
@@ -400,19 +542,24 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
           <Select
             label="Status"
             value={status}
-            onChange={(v) => setStatus(v as "ALL" | AssessmentSessionStatus)}
+            onChange={(v) => {
+              setStatus(v as "ALL" | AssessmentSessionStatus);
+              setPage(1);
+            }}
             options={["ALL", ...statuses]}
           />
           <button
             type="button"
             onClick={() => {
               setQuery("");
+              setDebouncedQuery("");
               setType("ALL");
               setSubjectId("ALL");
               setClassId("ALL");
               setStatus("ALL");
+              setPage(1);
             }}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            className="inline-flex h-10 w-full sm:w-auto items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50"
           >
             <RotateCcw className="size-4" />
             Reset Filter
@@ -443,7 +590,7 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
         <div className="border-b border-slate-100 px-5 py-4">
           <h2 className="font-bold text-[#102f50]">Daftar Assessment</h2>
           <p className="mt-1 text-xs text-slate-500">
-            {loading ? "Memuat data..." : `${filtered.length} assessment ditemukan`}
+            {loading ? "Memuat data..." : `${total} assessment ditemukan`}
           </p>
         </div>
 
@@ -452,7 +599,7 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
             <div className="inline-block size-8 animate-spin rounded-full border-4 border-solid border-[#102f50] border-r-transparent align-[-0.125em]" />
             <p className="mt-4 text-sm font-medium">Memuat data assessment...</p>
           </div>
-        ) : filtered.length === 0 ? (
+        ) : assessments.length === 0 ? (
           <div className="px-5 py-12 text-center text-slate-500">
             <p className="text-sm font-semibold text-slate-700">Belum ada assessment yang ditemukan.</p>
             <p className="mt-1 text-xs text-slate-500">
@@ -483,7 +630,7 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map((item) => (
+                  {assessments.map((item) => (
                     <AssessmentRow
                       key={item.id}
                       item={item}
@@ -492,6 +639,14 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
                       onEdit={openEdit}
                       canDelete={canDelete}
                       onDelete={requestDelete}
+                      onScore={(it) => {
+                        setSelectedAssessmentForScore(it);
+                        setScoreForm({ studentId: "", assessmentId: it.id, score: "", feedback: "" });
+                        setScoreNotice(null);
+                        setScoreError(null);
+                        setScoreErrors({});
+                        setScoreModalOpen(true);
+                      }}
                     />
                   ))}
                 </tbody>
@@ -499,7 +654,7 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
             </div>
 
             <div className="divide-y divide-slate-100 md:hidden">
-              {filtered.map((item) => (
+              {assessments.map((item) => (
                 <AssessmentCard
                   key={item.id}
                   item={item}
@@ -508,9 +663,43 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
                   onEdit={openEdit}
                   canDelete={canDelete}
                   onDelete={requestDelete}
+                  onScore={(it) => {
+                    setSelectedAssessmentForScore(it);
+                    setScoreForm({ studentId: "", assessmentId: it.id, score: "", feedback: "" });
+                    setScoreNotice(null);
+                    setScoreError(null);
+                    setScoreErrors({});
+                    setScoreModalOpen(true);
+                  }}
                 />
               ))}
             </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+                <span className="text-sm text-slate-500">
+                  Halaman {page} dari {totalPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1 || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Sebelumnya
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Berikutnya
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </section>
@@ -522,8 +711,19 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
           errors={errors}
           classes={classes}
           subjects={subjects}
+          students={allStudents}
           submitting={submitting}
-          onChange={(field, val) => setForm((c) => ({ ...c, [field]: val }))}
+          onChange={(field, val) => {
+            setForm((c) => ({ ...c, [field]: val }));
+            if (errors[field as keyof FormValues | "general"]) {
+              setErrors((prev) => {
+                const next = { ...prev };
+                delete next[field as keyof FormValues | "general"];
+                delete next.general;
+                return next;
+              });
+            }
+          }}
           onSubmit={submit}
           onClose={() => setModal(null)}
         />
@@ -539,6 +739,119 @@ export function AssessmentsPage({ canDelete = false, canCreate = false }: { canD
           }}
           onConfirm={deleteAssessment}
         />
+      )}
+
+      {scoreModalOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 p-4" role="dialog" aria-modal="true">
+          <form onSubmit={handleScoreSubmit} className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <div>
+                <h2 className="font-bold text-[#102f50]">Berikan Penilaian</h2>
+                <p className="mt-1 text-xs text-slate-500">Berikan nilai kepada peserta secara individual</p>
+              </div>
+              <button type="button" onClick={() => { setScoreModalOpen(false); setSelectedAssessmentForScore(null); }} disabled={scoreSubmitting} className="text-slate-400 hover:text-slate-600">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {scoreNotice && (
+              <div className="mt-4 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800">
+                {scoreNotice}
+              </div>
+            )}
+            {scoreError && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                {scoreError}
+              </div>
+            )}
+
+            <div className="mt-4 grid gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">1. Peserta *</label>
+                <select
+                  value={scoreForm.studentId}
+                  onChange={(e) => {
+                    setScoreForm(prev => ({ ...prev, studentId: e.target.value, assessmentId: "" }));
+                  }}
+                  disabled={scoreSubmitting}
+                  className={`mt-1 h-10 w-full rounded-lg border bg-white px-3 text-sm focus:outline-none ${scoreErrors.studentId ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                >
+                  <option value="" disabled>Pilih Peserta</option>
+                  {availableStudentsForScore.map(st => (
+                    <option key={st.id} value={st.id}>{st.name} — {st.nim}</option>
+                  ))}
+                </select>
+                {scoreErrors.studentId && <p className="mt-1 text-xs text-red-600">{scoreErrors.studentId}</p>}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">2. Assessment *</label>
+                {(() => {
+                  const sel = selectedAssessmentForScore || assessments.find(a => a.id === scoreForm.assessmentId);
+                  if (!sel) return <div className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm text-slate-500">-</div>;
+                  return (
+                    <div className="mt-1 flex h-10 w-full items-center rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-700">
+                      {sel.name} — {sel.subject.name} {sel.class?.batch?.name ? `— ${sel.class.batch.name}` : ""}
+                    </div>
+                  );
+                })()}
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700">3. Nilai *</label>
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={scoreForm.score}
+                    onChange={(e) => setScoreForm(prev => ({ ...prev, score: e.target.value }))}
+                    disabled={scoreSubmitting}
+                    placeholder="Contoh: 85"
+                    className={`mt-1 h-10 w-full rounded-lg border bg-white px-3 text-sm focus:outline-none ${scoreErrors.score ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                  />
+                  {scoreErrors.score && <p className="mt-1 text-xs text-red-600">{scoreErrors.score}</p>}
+                </div>
+                <div>
+                  <label className="block text-xs font-semibold text-slate-700">4. Nilai Maksimum</label>
+                  <input
+                    type="text"
+                    value={(selectedAssessmentForScore || assessments.find(a => a.id === scoreForm.assessmentId))?.maxScore || "-"}
+                    disabled
+                    className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-slate-50 px-3 text-sm text-slate-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">5. Catatan</label>
+                <input
+                  type="text"
+                  value={scoreForm.feedback}
+                  onChange={(e) => setScoreForm(prev => ({ ...prev, feedback: e.target.value }))}
+                  disabled={scoreSubmitting}
+                  placeholder="Catatan / feedback untuk peserta (opsional)"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-[#102f50] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button type="button" onClick={() => { setScoreModalOpen(false); setSelectedAssessmentForScore(null); }} disabled={scoreSubmitting} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">
+                Batal
+              </button>
+              <button type="submit" disabled={scoreSubmitting} className="inline-flex items-center justify-center gap-2 rounded-lg bg-[#c94242] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#a83232] transition disabled:opacity-50 min-w-[140px]">
+                {scoreSubmitting ? (
+                  <>
+                    <Loader2 className="size-4 animate-spin" />
+                    <span>Menyimpan...</span>
+                  </>
+                ) : (
+                  <span>Simpan Nilai</span>
+                )}
+              </button>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   );
@@ -557,7 +870,7 @@ function Select({
 }) {
   return (
     <label>
-      <span className="mb-2 block text-xs font-semibold text-slate-600">{label}</span>
+      <span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
@@ -584,6 +897,7 @@ function AssessmentRow({
   onEdit,
   canDelete,
   onDelete,
+  onScore,
 }: {
   item: ApiAssessment;
   openMenu: string | null;
@@ -591,6 +905,7 @@ function AssessmentRow({
   onEdit: (item: ApiAssessment) => void;
   canDelete: boolean;
   onDelete: (item: ApiAssessment) => void;
+  onScore: (item: ApiAssessment) => void;
 }) {
   return (
     <tr className="hover:bg-slate-50/50">
@@ -618,6 +933,7 @@ function AssessmentRow({
           onEdit={onEdit}
           canDelete={canDelete}
           onDelete={onDelete}
+          onScore={onScore}
         />
       </td>
     </tr>
@@ -631,6 +947,7 @@ function AssessmentCard({
   onEdit,
   canDelete,
   onDelete,
+  onScore,
 }: {
   item: ApiAssessment;
   openMenu: string | null;
@@ -638,6 +955,7 @@ function AssessmentCard({
   onEdit: (item: ApiAssessment) => void;
   canDelete: boolean;
   onDelete: (item: ApiAssessment) => void;
+  onScore: (item: ApiAssessment) => void;
 }) {
   return (
     <article className="p-5">
@@ -664,6 +982,7 @@ function AssessmentCard({
           onEdit={onEdit}
           canDelete={canDelete}
           onDelete={onDelete}
+          onScore={onScore}
         />
       </div>
     </article>
@@ -677,6 +996,7 @@ function Actions({
   onEdit,
   canDelete,
   onDelete,
+  onScore,
 }: {
   item: ApiAssessment;
   openMenu: string | null;
@@ -684,6 +1004,7 @@ function Actions({
   onEdit: (item: ApiAssessment) => void;
   canDelete: boolean;
   onDelete: (item: ApiAssessment) => void;
+  onScore: (item: ApiAssessment) => void;
 }) {
   return (
     <div className="flex items-center gap-1">
@@ -711,6 +1032,18 @@ function Actions({
             >
               Detail Nilai
             </Link>
+            {item.status === "OPEN" && (
+              <button
+                type="button"
+                onClick={() => {
+                  setOpenMenu(null);
+                  onScore(item);
+                }}
+                className="block w-full rounded-md px-3 py-2 text-left hover:bg-slate-50 font-medium text-[#102f50]"
+              >
+                Berikan Nilai
+              </button>
+            )}
             <button
               type="button"
               onClick={() => onEdit(item)}
@@ -765,6 +1098,7 @@ function AssessmentModal({
   errors,
   classes,
   subjects,
+  students,
   submitting,
   onChange,
   onSubmit,
@@ -772,9 +1106,10 @@ function AssessmentModal({
 }: {
   mode: "create" | "edit";
   values: FormValues;
-  errors: Partial<Record<keyof FormValues, string>>;
+  errors: Partial<Record<keyof FormValues | "general", string>>;
   classes: ApiClass[];
   subjects: ApiSubject[];
+  students?: Array<{ id: string; nim: string; name: string }>;
   submitting: boolean;
   onChange: (field: keyof FormValues, val: string | number) => void;
   onSubmit: (e: React.FormEvent) => void;
@@ -809,6 +1144,13 @@ function AssessmentModal({
           </button>
         </div>
 
+        {errors.general && (
+          <div className="mt-4 flex items-start gap-2.5 rounded-lg border border-[#c94242]/30 bg-red-50 p-3 text-xs text-[#c94242]">
+            <AlertCircle className="size-4 shrink-0 mt-0.5 text-[#c94242]" />
+            <span>{errors.general}</span>
+          </div>
+        )}
+
         <div className="mt-5 grid gap-4 sm:grid-cols-2">
           <label className="sm:col-span-2">
             <span className="mb-1.5 block text-xs font-semibold text-slate-600">
@@ -826,6 +1168,38 @@ function AssessmentModal({
               <span className="mt-1 block text-xs text-[#c94242]">{errors.name}</span>
             )}
           </label>
+
+          {mode === "create" ? (
+            <label className="sm:col-span-2">
+              <span className="mb-1.5 block text-xs font-semibold text-slate-600">Peserta *</span>
+              <select
+                value={values.studentId || ""}
+                onChange={(e) => onChange("studentId", e.target.value)}
+                className={`h-10 w-full rounded-lg border px-3 text-sm focus:outline-none ${
+                  errors.studentId ? "border-[#c94242]" : "border-slate-200"
+                }`}
+              >
+                <option value="">Pilih Peserta</option>
+                {students?.map((s) => (
+                  <option key={s.id} value={s.id}>
+                    {s.name} — {s.nim}
+                  </option>
+                ))}
+              </select>
+              {errors.studentId && (
+                <span className="mt-1 block text-xs text-[#c94242]">{errors.studentId}</span>
+              )}
+            </label>
+          ) : (
+            <div className="flex flex-col justify-center rounded-lg border border-slate-100 bg-slate-50 px-3 py-2 sm:col-span-2">
+              <span className="mb-0.5 text-[10px] font-semibold uppercase tracking-wider text-slate-500">
+                Kelas Terkait
+              </span>
+              <span className="text-sm font-medium text-slate-700">
+                {classes.find((c) => c.id === values.classId)?.name || "Tidak diketahui"}
+              </span>
+            </div>
+          )}
 
           <label>
             <span className="mb-1.5 block text-xs font-semibold text-slate-600">Type *</span>
@@ -847,37 +1221,17 @@ function AssessmentModal({
               Nilai Maksimum *
             </span>
             <input
-              type="number"
-              min="1"
+              type="text"
+              inputMode="numeric"
+              placeholder="Contoh: 100"
               value={values.maxScore}
-              onChange={(e) => onChange("maxScore", Number(e.target.value))}
+              onChange={(e) => onChange("maxScore", e.target.value)}
               className={`h-10 w-full rounded-lg border px-3 text-sm focus:outline-none ${
                 errors.maxScore ? "border-[#c94242]" : "border-slate-200"
               }`}
             />
             {errors.maxScore && (
               <span className="mt-1 block text-xs text-[#c94242]">{errors.maxScore}</span>
-            )}
-          </label>
-
-          <label>
-            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Kelas *</span>
-            <select
-              value={values.classId}
-              onChange={(e) => onChange("classId", e.target.value)}
-              className={`h-10 w-full rounded-lg border px-3 text-sm focus:outline-none ${
-                errors.classId ? "border-[#c94242]" : "border-slate-200"
-              }`}
-            >
-              <option value="">Pilih Kelas</option>
-              {classes.map((c) => (
-                <option key={c.id} value={c.id}>
-                  {c.name} {c.batch?.name ? `(${c.batch.name})` : ""}
-                </option>
-              ))}
-            </select>
-            {errors.classId && (
-              <span className="mt-1 block text-xs text-[#c94242]">{errors.classId}</span>
             )}
           </label>
 

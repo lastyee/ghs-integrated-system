@@ -93,11 +93,27 @@ export function AttendancePage() {
   const [reloadKey, setReloadKey] = useState(0);
 
   const [query, setQuery] = useState("");
+  const [debouncedQuery, setDebouncedQuery] = useState("");
   const [date, setDate] = useState("ALL");
   const [batch, setBatch] = useState("ALL");
   const [subject, setSubject] = useState("ALL");
   const [instructor, setInstructor] = useState("ALL");
   const [status, setStatus] = useState<"ALL" | SessionStatus>("ALL");
+
+  const [page, setPage] = useState(1);
+  const [total, setTotal] = useState(0);
+  const [totalPages, setTotalPages] = useState(1);
+  const [stats, setStats] = useState({
+    totalSchedules: 0,
+    completedSchedules: 0,
+    openSchedules: 0,
+    totalAttendances: 0,
+  });
+
+  const [filterDates, setFilterDates] = useState<string[]>([]);
+  const [filterBatches, setFilterBatches] = useState<string[]>([]);
+  const [filterSubjects, setFilterSubjects] = useState<string[]>([]);
+  const [filterInstructors, setFilterInstructors] = useState<string[]>([]);
 
   const handleReload = () => {
     setLoading(true);
@@ -107,26 +123,40 @@ export function AttendancePage() {
   };
 
   useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedQuery(query);
+      setPage(1);
+    }, 500);
+    return () => clearTimeout(timer);
+  }, [query]);
+
+  useEffect(() => {
     let ignore = false;
 
     async function loadData() {
+      setLoading(true);
       try {
-        const [schedRes, attRes] = await Promise.all([
-          fetch("/api/schedules", { headers: { Accept: "application/json" } }),
-          fetch("/api/attendances", { headers: { Accept: "application/json" } }),
-        ]);
+        const schedParams = new URLSearchParams({
+          page: page.toString(),
+          limit: "20",
+          ...(debouncedQuery ? { search: debouncedQuery } : {}),
+          ...(status !== "ALL" ? { status } : {}),
+          ...(date !== "ALL" ? { date } : {}),
+          ...(batch !== "ALL" ? { batch } : {}),
+          ...(subject !== "ALL" ? { subject } : {}),
+          ...(instructor !== "ALL" ? { instructor } : {}),
+        });
+
+        const schedRes = await fetch(`/api/schedules?${schedParams.toString()}`, { headers: { Accept: "application/json" } });
 
         if (ignore) return;
 
-        const authError = [schedRes, attRes].find(
-          (response) => response.status === 401 || response.status === 403,
-        );
-        if (authError) {
-          setAuthErrorStatus(authError.status === 401 ? 401 : 403);
-          const data = await authError.json().catch(() => ({}));
+        if (schedRes.status === 401 || schedRes.status === 403) {
+          setAuthErrorStatus(schedRes.status as 401 | 403);
+          const data = await schedRes.json().catch(() => ({}));
           setError(
             data.error ||
-              (authError.status === 401
+              (schedRes.status === 401
                 ? "Sesi Anda berakhir. Silakan login kembali."
                 : "Akses tidak diizinkan untuk membaca data absensi."),
           );
@@ -139,17 +169,51 @@ export function AttendancePage() {
           return;
         }
 
-        if (!attRes.ok) {
-          const data = await attRes.json().catch(() => ({}));
-          setError(data.error || `Gagal memuat absensi (HTTP ${attRes.status})`);
-          return;
-        }
-
-        const [schedJson, attJson] = await Promise.all([schedRes.json(), attRes.json()]);
+        const schedJson = await schedRes.json();
         if (ignore) return;
 
-        setSchedules(Array.isArray(schedJson.data) ? schedJson.data : []);
-        setAttendances(Array.isArray(attJson.data) ? attJson.data : []);
+        const fetchedSchedules = Array.isArray(schedJson.data) ? schedJson.data : [];
+        setSchedules(fetchedSchedules);
+        setTotal(schedJson.pagination?.total || 0);
+        setTotalPages(schedJson.pagination?.totalPages || 1);
+        setFilterDates(["ALL", ...(schedJson.filterOptions?.dates || [])]);
+        setFilterBatches(["ALL", ...(schedJson.filterOptions?.batches || [])]);
+        setFilterSubjects(["ALL", ...(schedJson.filterOptions?.subjects || [])]);
+        setFilterInstructors(["ALL", ...(schedJson.filterOptions?.instructors || [])]);
+
+        // Fetch attendances for these schedules + global stats
+        if (fetchedSchedules.length === 0) {
+          setAttendances([]);
+          // Fetch global stats with scheduleIds="" so no attendances are queried
+          const attRes = await fetch(`/api/attendances?limit=1&scheduleIds=`, {
+            headers: { Accept: "application/json" },
+          });
+          if (attRes.ok) {
+            const attJson = await attRes.json();
+            if (!ignore && attJson.stats) {
+              setStats(attJson.stats);
+            }
+          }
+        } else {
+          const scheduleIds = fetchedSchedules.map((s: ApiScheduleSummary) => s.id).join(",");
+          const attParams = new URLSearchParams({ limit: "1000", scheduleIds });
+
+          const attRes = await fetch(`/api/attendances?${attParams.toString()}`, {
+            headers: { Accept: "application/json" },
+          });
+          if (!attRes.ok) {
+            // Silently fail or log, but continue to show schedules
+            console.error("Failed to load attendances");
+          } else {
+            const attJson = await attRes.json();
+            if (!ignore) {
+              setAttendances(Array.isArray(attJson.data) ? attJson.data : []);
+              if (attJson.stats) {
+                setStats(attJson.stats);
+              }
+            }
+          }
+        }
       } catch (err) {
         if (ignore) return;
         setError(err instanceof Error ? err.message : "Terjadi kesalahan jaringan.");
@@ -165,7 +229,7 @@ export function AttendancePage() {
     return () => {
       ignore = true;
     };
-  }, [reloadKey]);
+  }, [reloadKey, page, debouncedQuery, status, date, batch, subject, instructor]);
 
   const attendancesBySchedule = useMemo(() => {
     const map = new Map<string, ApiAttendanceItem[]>();
@@ -178,51 +242,8 @@ export function AttendancePage() {
   }, [attendances]);
 
   const options = useMemo(() => {
-    const dates = ["ALL", ...new Set(schedules.map((s) => s.date.substring(0, 10)).sort())];
-    const batches = ["ALL", ...new Set(schedules.map((s) => s.class?.batch?.name).filter(Boolean).sort())];
-    const subjects = ["ALL", ...new Set(schedules.map((s) => s.subject?.name).filter(Boolean).sort())];
-    const instructors = ["ALL", ...new Set(schedules.map((s) => s.instructor?.name).filter(Boolean).sort())];
-    return { dates, batches, subjects, instructors };
-  }, [schedules]);
-
-  const filtered = useMemo(() => {
-    return schedules.filter((schedule) => {
-      const records = attendancesBySchedule.get(schedule.id) ?? [];
-      const sessionStatus: SessionStatus = records.length > 0 ? "COMPLETED" : "OPEN";
-      const q = query.trim().toLowerCase();
-      const schedDate = schedule.date.substring(0, 10);
-      const batchName = schedule.class?.batch?.name || "";
-      const subjectName = schedule.subject?.name || "";
-      const instructorName = schedule.instructor?.name || "";
-      const room = schedule.room || "";
-      const className = schedule.class?.name || "";
-
-      const matchesQuery =
-        !q ||
-        `${subjectName} ${className} ${batchName} ${instructorName} ${room}`
-          .toLowerCase()
-          .includes(q);
-
-      const matchDate = date === "ALL" || schedDate === date;
-      const matchBatch = batch === "ALL" || batchName === batch;
-      const matchSubject = subject === "ALL" || subjectName === subject;
-      const matchInstructor = instructor === "ALL" || instructorName === instructor;
-      const matchStatus = status === "ALL" || sessionStatus === status;
-
-      return matchesQuery && matchDate && matchBatch && matchSubject && matchInstructor && matchStatus;
-    });
-  }, [attendancesBySchedule, batch, date, instructor, query, schedules, status, subject]);
-
-  const completedSessionsCount = useMemo(() => {
-    let count = 0;
-    for (const schedule of schedules) {
-      const records = attendancesBySchedule.get(schedule.id) ?? [];
-      if (records.length > 0) count++;
-    }
-    return count;
-  }, [attendancesBySchedule, schedules]);
-
-  const openSessionsCount = schedules.length - completedSessionsCount;
+    return { dates: filterDates, batches: filterBatches, subjects: filterSubjects, instructors: filterInstructors };
+  }, [filterDates, filterBatches, filterSubjects, filterInstructors]);
 
   const resetFilters = () => {
     setQuery("");
@@ -231,6 +252,7 @@ export function AttendancePage() {
     setSubject("ALL");
     setInstructor("ALL");
     setStatus("ALL");
+    setPage(1);
   };
 
   return (
@@ -250,28 +272,28 @@ export function AttendancePage() {
       <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4" aria-label="Statistik kehadiran">
         <StatCard
           label="Total Sesi"
-          value={String(schedules.length)}
+          value={String(stats.totalSchedules)}
           description="Sesi training terdaftar"
           icon={CalendarDays}
           tone="navy"
         />
         <StatCard
           label="Sudah Diisi"
-          value={String(completedSessionsCount)}
+          value={String(stats.completedSchedules)}
           description="Sesi dengan absensi"
           icon={CheckCircle2}
           tone="blue"
         />
         <StatCard
           label="Belum Diisi"
-          value={String(openSessionsCount)}
+          value={String(stats.openSchedules)}
           description="Sesi menunggu absensi"
           icon={Clock}
           tone="yellow"
         />
         <StatCard
           label="Rekam Absensi"
-          value={String(attendances.length)}
+          value={String(stats.totalAttendances)}
           description="Total data kehadiran"
           icon={CalendarDays}
           tone="red"
@@ -279,34 +301,34 @@ export function AttendancePage() {
       </section>
 
       {/* Filter Bar */}
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-5 shadow-sm">
-        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-[minmax(210px,1.2fr)_repeat(5,minmax(125px,0.8fr))_auto] xl:items-end">
-          <label>
-            <span className="mb-2 block text-xs font-semibold text-slate-600">Cari Sesi</span>
+      <section className="mt-6 rounded-xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-[2fr_1fr_1fr_1fr_1fr_1fr_auto] xl:items-end">
+          <label className="block min-w-0 sm:col-span-2 md:col-span-3 lg:col-span-2 xl:col-span-1">
+            <span className="mb-1.5 block text-xs font-semibold text-slate-600">Cari Sesi</span>
             <span className="relative block">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-slate-400" />
               <input
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Cari subject, class, batch, atau room..."
-                className="h-10 w-full rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#102f50] focus:outline-none"
+                placeholder="Cari subject, class, batch"
+                className="h-10 w-full min-w-0 rounded-lg border border-slate-200 pl-9 pr-3 text-sm focus:border-[#102f50] focus:outline-none"
               />
             </span>
           </label>
-          <FilterSelect label="Tanggal" value={date} onChange={setDate} options={options.dates} />
-          <FilterSelect label="Batch" value={batch} onChange={setBatch} options={options.batches} />
-          <FilterSelect label="Subject" value={subject} onChange={setSubject} options={options.subjects} />
-          <FilterSelect label="Instructor" value={instructor} onChange={setInstructor} options={options.instructors} />
+          <FilterSelect label="Tanggal" value={date} onChange={(v) => { setDate(v); setPage(1); }} options={options.dates} />
+          <FilterSelect label="Batch" value={batch} onChange={(v) => { setBatch(v); setPage(1); }} options={options.batches} />
+          <FilterSelect label="Subject" value={subject} onChange={(v) => { setSubject(v); setPage(1); }} options={options.subjects} />
+          <FilterSelect label="Instructor" value={instructor} onChange={(v) => { setInstructor(v); setPage(1); }} options={options.instructors} />
           <FilterSelect
             label="Status Sesi"
             value={status}
-            onChange={(v) => setStatus(v as "ALL" | SessionStatus)}
+            onChange={(v) => { setStatus(v as "ALL" | SessionStatus); setPage(1); }}
             options={["ALL", "OPEN", "COMPLETED"]}
           />
           <button
             type="button"
             onClick={resetFilters}
-            className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-slate-200 px-3 text-sm font-semibold text-slate-600 hover:bg-slate-50"
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-slate-200 px-4 text-sm font-semibold text-slate-600 hover:bg-slate-50 xl:w-auto"
           >
             <RotateCcw className="size-4" />
             Reset
@@ -319,7 +341,7 @@ export function AttendancePage() {
         <div className="border-b border-slate-100 px-5 py-4">
           <h2 className="font-bold text-[#102f50]">Daftar Sesi Attendance</h2>
           <p className="mt-1 text-xs text-slate-500">
-            {loading ? "Memuat data dari database..." : `${filtered.length} sesi ditampilkan`}
+            {loading ? "Memuat data dari database..." : `${total} sesi ditampilkan`}
           </p>
         </div>
 
@@ -378,7 +400,7 @@ export function AttendancePage() {
         )}
 
         {/* 4. Empty State */}
-        {!loading && !error && filtered.length === 0 && (
+        {!loading && !error && schedules.length === 0 && (
           <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
             <div className="rounded-full bg-slate-100 p-3 text-slate-400">
               <Filter className="size-6" />
@@ -402,7 +424,7 @@ export function AttendancePage() {
         )}
 
         {/* 5. Successful Data */}
-        {!loading && !error && filtered.length > 0 && (
+        {!loading && !error && schedules.length > 0 && (
           <>
             <div className="hidden overflow-x-auto md:block">
               <table className="w-full min-w-225 text-left text-sm">
@@ -419,7 +441,7 @@ export function AttendancePage() {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filtered.map((item) => {
+                  {schedules.map((item) => {
                     const records = attendancesBySchedule.get(item.id) ?? [];
                     return (
                       <SessionRow
@@ -434,7 +456,7 @@ export function AttendancePage() {
             </div>
 
             <div className="divide-y divide-slate-100 md:hidden">
-              {filtered.map((item) => {
+              {schedules.map((item) => {
                 const records = attendancesBySchedule.get(item.id) ?? [];
                 return (
                   <SessionCard
@@ -445,6 +467,32 @@ export function AttendancePage() {
                 );
               })}
             </div>
+
+            {totalPages > 1 && (
+              <div className="flex items-center justify-between border-t border-slate-100 px-5 py-4">
+                <span className="text-sm text-slate-500">
+                  Halaman {page} dari {totalPages}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.max(1, p - 1))}
+                    disabled={page === 1 || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Sebelumnya
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+                    disabled={page === totalPages || loading}
+                    className="rounded-lg border border-slate-200 px-3 py-1.5 text-sm font-semibold text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                  >
+                    Berikutnya
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
       </section>
@@ -464,12 +512,12 @@ function FilterSelect({
   options: readonly string[];
 }) {
   return (
-    <label>
-      <span className="mb-2 block text-xs font-semibold text-slate-600">{label}</span>
+    <label className="block min-w-0">
+      <span className="mb-1.5 block text-xs font-semibold text-slate-600">{label}</span>
       <select
         value={value}
         onChange={(e) => onChange(e.target.value)}
-        className="h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-[#102f50] focus:outline-none"
+        className="h-10 w-full min-w-0 rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-[#102f50] focus:outline-none"
       >
         <option value="ALL">Semua {label}</option>
         {options

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { AlertCircle, ArrowLeft, CheckCircle2, Save, Trash2 } from "lucide-react";
+import { AlertCircle, ArrowLeft, CheckCircle2, Trash2, Edit2, X, Plus, Loader2 } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { DeleteConfirmationDialog } from "@/components/common/delete-confirmation-dialog";
 import { SoftDeleteAction } from "@/components/common/soft-delete-action";
@@ -62,10 +62,16 @@ export function AssessmentDetail({
   assessmentId,
   canDelete = false,
   canDeleteScores = false,
+  canCreateScores = false,
+  isStudent = false,
+  currentStudentId,
 }: {
   assessmentId: string;
   canDelete?: boolean;
   canDeleteScores?: boolean;
+  canCreateScores?: boolean;
+  isStudent?: boolean;
+  currentStudentId?: string;
 }) {
   const router = useRouter();
   const [assessment, setAssessment] = useState<ApiAssessmentDetail | null>(null);
@@ -74,11 +80,25 @@ export function AssessmentDetail({
   const [unauthorized, setUnauthorized] = useState(false);
   const [notFound, setNotFound] = useState(false);
 
-  // Editable scores state per studentId
-  const [scoreInputs, setScoreInputs] = useState<Record<string, { score: string; feedback: string }>>({});
-  const [savingStudentId, setSavingStudentId] = useState<string | null>(null);
+  const [enrolledStudents, setEnrolledStudents] = useState<Array<{ id: string; nim: string; name: string }>>([]);
+  const [scoreModal, setScoreModal] = useState<{
+    isOpen: boolean;
+    scoreId: string | null;
+    studentId: string;
+    score: string;
+    feedback: string;
+  }>({
+    isOpen: false,
+    scoreId: null,
+    studentId: "",
+    score: "",
+    feedback: "",
+  });
+  const [submitLoading, setSubmitLoading] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
+  const [formErrors, setFormErrors] = useState<Record<string, string>>({});
+
   const [actionMessage, setActionMessage] = useState<string | null>(null);
-  const [inputErrors, setInputErrors] = useState<Record<string, string>>({});
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [deletePending, setDeletePending] = useState(false);
   const [deleteError, setDeleteError] = useState<string | null>(null);
@@ -115,16 +135,6 @@ export function AssessmentDetail({
       const assessmentData: ApiAssessmentDetail = await resAssessment.json();
       setAssessment(assessmentData);
 
-      // Initialize inputs from existing scores
-      const initialInputs: Record<string, { score: string; feedback: string }> = {};
-      for (const s of assessmentData.scores) {
-        initialInputs[s.studentId] = {
-          score: s.score !== null ? String(s.score) : "",
-          feedback: s.feedback ?? "",
-        };
-      }
-
-      // If user is admin/staff and we have students/enrollments, load enrolled students
       if (resStudents.ok && resEnrollments.ok) {
         const studentsData = await resStudents.json();
         const enrollmentsData = await resEnrollments.json();
@@ -138,14 +148,9 @@ export function AssessmentDetail({
             .map((e: { studentId: string }) => e.studentId)
         );
 
-        for (const st of allStudents) {
-          if (enrolledStudentIds.has(st.id) && !initialInputs[st.id]) {
-            initialInputs[st.id] = { score: "", feedback: "" };
-          }
-        }
+        const enrolled = allStudents.filter((st: { id: string }) => enrolledStudentIds.has(st.id));
+        setEnrolledStudents(enrolled);
       }
-
-      setScoreInputs(initialInputs);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Terjadi kesalahan saat memuat detail.");
     } finally {
@@ -154,6 +159,7 @@ export function AssessmentDetail({
   }, [assessmentId]);
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     fetchAssessment();
   }, [fetchAssessment]);
 
@@ -161,76 +167,66 @@ export function AssessmentDetail({
   const rows: StudentRowData[] = useMemo(() => {
     if (!assessment) return [];
 
-    const existingScoresMap = new Map(assessment.scores.map((s) => [s.studentId, s]));
-    const studentList: StudentRowData[] = [];
-
-    // First add existing scores
-    for (const s of assessment.scores) {
-      studentList.push({
-        studentId: s.studentId,
-        nim: s.student.nim,
-        studentName: s.student.name,
-        scoreId: s.id,
-        score: s.score,
-        feedback: s.feedback,
-      });
+    let filteredScores = assessment.scores;
+    if (isStudent && currentStudentId) {
+      filteredScores = filteredScores.filter(s => s.studentId === currentStudentId);
     }
 
-    // Next add students in scoreInputs that don't have a score record yet (unscored enrolled students)
-    for (const [stId] of Object.entries(scoreInputs)) {
-      if (!existingScoresMap.has(stId)) {
-        // Find if we have student info
-        studentList.push({
-          studentId: stId,
-          nim: "-",
-          studentName: `Peserta (${stId.substring(0, 8)})`,
-          scoreId: null,
-          score: null,
-          feedback: null,
-        });
+    return filteredScores.map((s) => ({
+      studentId: s.studentId,
+      nim: s.student.nim,
+      studentName: s.student.name,
+      scoreId: s.id,
+      score: s.score,
+      feedback: s.feedback,
+    }));
+  }, [assessment, isStudent, currentStudentId]);
+
+  const closeScoreModal = () => {
+    if (submitLoading) return;
+    setScoreModal({ isOpen: false, scoreId: null, studentId: "", score: "", feedback: "" });
+    setFormErrors({});
+    setSubmitError(null);
+  };
+
+  const handleSaveModal = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!assessment) return;
+
+    const errs: Record<string, string> = {};
+    if (!scoreModal.studentId) errs.studentId = "Peserta wajib dipilih.";
+    if (scoreModal.score.trim() === "") {
+      errs.score = "Nilai wajib diisi.";
+    } else {
+      const numScore = Number(scoreModal.score);
+      if (!Number.isFinite(numScore)) {
+        errs.score = "Nilai harus berupa angka numerik.";
+      } else if (numScore < 0 || numScore > assessment.maxScore) {
+        errs.score = `Nilai harus antara 0 dan ${assessment.maxScore}.`;
       }
     }
 
-    return studentList;
-  }, [assessment, scoreInputs]);
-
-  const handleSaveScore = async (studentId: string, existingScoreId: string | null) => {
-    if (!assessment) return;
-    const input = scoreInputs[studentId] ?? { score: "", feedback: "" };
-
-    setInputErrors((prev) => ({ ...prev, [studentId]: "" }));
-    setActionMessage(null);
-
-    if (input.score.trim() === "") {
-      setInputErrors((prev) => ({ ...prev, [studentId]: "Nilai tidak boleh kosong." }));
+    if (Object.keys(errs).length > 0) {
+      setFormErrors(errs);
       return;
     }
-
-    const numScore = Number(input.score);
-    if (!Number.isFinite(numScore)) {
-      setInputErrors((prev) => ({ ...prev, [studentId]: "Nilai harus berupa angka numerik." }));
-      return;
-    }
-
-    if (numScore < 0 || numScore > assessment.maxScore) {
-      setInputErrors((prev) => ({
-        ...prev,
-        [studentId]: `Nilai harus antara 0 dan ${assessment.maxScore}.`,
-      }));
-      return;
-    }
-
-    setSavingStudentId(studentId);
 
     try {
-      if (existingScoreId) {
-        // PATCH existing score
-        const res = await fetch(`/api/assessments/${assessment.id}/scores/${existingScoreId}`, {
+      setSubmitLoading(true);
+      setSubmitError(null);
+      setFormErrors({});
+      setActionMessage(null);
+
+      const numScore = Number(scoreModal.score);
+      const isExisting = !!scoreModal.scoreId;
+
+      if (isExisting) {
+        const res = await fetch(`/api/assessments/${assessment.id}/scores/${scoreModal.scoreId}`, {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             score: numScore,
-            feedback: input.feedback.trim() || null,
+            feedback: scoreModal.feedback.trim() || null,
           }),
         });
 
@@ -238,36 +234,31 @@ export function AssessmentDetail({
           const errData = await res.json().catch(() => ({}));
           throw new Error(errData.message || "Gagal memperbarui nilai.");
         }
-
         setActionMessage("Nilai berhasil diperbarui.");
       } else {
-        // POST new score
         const res = await fetch(`/api/assessments/${assessment.id}/scores`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            studentId,
+            studentId: scoreModal.studentId,
             score: numScore,
-            feedback: input.feedback.trim() || null,
+            feedback: scoreModal.feedback.trim() || null,
           }),
         });
 
         if (!res.ok) {
           const errData = await res.json().catch(() => ({}));
-          throw new Error(errData.message || "Gagal menyimpan nilai.");
+          throw new Error(errData.message || "Gagal menyimpan nilai. Mungkin nilai untuk peserta ini sudah ada.");
         }
-
         setActionMessage("Nilai berhasil disimpan.");
       }
 
+      closeScoreModal();
       await fetchAssessment();
     } catch (err: unknown) {
-      setInputErrors((prev) => ({
-        ...prev,
-        [studentId]: err instanceof Error ? err.message : "Terjadi kesalahan.",
-      }));
+      setSubmitError(err instanceof Error ? err.message : "Terjadi kesalahan.");
     } finally {
-      setSavingStudentId(null);
+      setSubmitLoading(false);
     }
   };
 
@@ -463,16 +454,33 @@ export function AssessmentDetail({
       </section>
 
       <section className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm overflow-hidden">
-        <div className="border-b border-slate-100 px-5 py-4">
-          <h2 className="font-bold text-[#102f50]">Daftar Nilai Peserta</h2>
-          <p className="mt-1 text-xs text-slate-500">
-            Input dan tinjauan nilai mahasiswa untuk sesi {assessment.name}
-          </p>
+        <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
+          <div>
+            <h2 className="font-bold text-[#102f50]">
+              {isStudent ? "Nilai Saya" : "Daftar Nilai Peserta"}
+            </h2>
+            <p className="mt-1 text-xs text-slate-500">
+              {isStudent
+                ? "Perolehan nilai Anda untuk assessment ini"
+                : `Input dan tinjauan nilai mahasiswa untuk sesi ${assessment.name}`
+              }
+            </p>
+          </div>
+          {canCreateScores && (
+            <button
+              type="button"
+              onClick={() => setScoreModal({ isOpen: true, scoreId: null, studentId: "", score: "", feedback: "" })}
+              className="inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-3 py-2 text-sm font-semibold text-white hover:bg-[#0c233c] transition-colors"
+            >
+              <Plus className="size-4" />
+              <span className="hidden sm:inline">Berikan Nilai</span>
+            </button>
+          )}
         </div>
 
         {rows.length === 0 ? (
           <div className="p-12 text-center text-slate-500">
-            <p className="text-sm font-medium">Belum ada data peserta yang terdaftar untuk sesi ini.</p>
+            <p className="text-sm font-medium">Belum ada nilai peserta.</p>
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -483,18 +491,13 @@ export function AssessmentDetail({
                   <th className="px-5 py-3 font-semibold">Nama Mahasiswa</th>
                   <th className="px-5 py-3 font-semibold">Nilai (Maks. {assessment.maxScore})</th>
                   <th className="px-5 py-3 font-semibold">Feedback / Catatan</th>
-                  <th className="px-5 py-3 font-semibold">Status</th>
-                  <th className="px-5 py-3 font-semibold">Aksi</th>
+                  {(!isStudent || canCreateScores || canDeleteScores) && (
+                    <th className="px-5 py-3 font-semibold">Aksi</th>
+                  )}
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {rows.map((row) => {
-                  const inputVal = scoreInputs[row.studentId]?.score ?? "";
-                  const feedbackVal = scoreInputs[row.studentId]?.feedback ?? "";
-                  const isScored = row.score !== null;
-                  const isSaving = savingStudentId === row.studentId;
-                  const rowErr = inputErrors[row.studentId];
-
                   return (
                     <tr key={row.studentId} className="hover:bg-slate-50/50">
                       <td className="px-5 py-4 font-mono text-xs font-semibold text-[#123b63]">
@@ -504,82 +507,43 @@ export function AssessmentDetail({
                         {row.studentName}
                       </td>
                       <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
-                          <input
-                            type="number"
-                            min="0"
-                            max={assessment.maxScore}
-                            value={inputVal}
-                            onChange={(e) =>
-                              setScoreInputs((prev) => ({
-                                ...prev,
-                                [row.studentId]: {
-                                  score: e.target.value,
-                                  feedback: prev[row.studentId]?.feedback ?? "",
-                                },
-                              }))
-                            }
-                            placeholder="-"
-                            className={`h-9 w-20 rounded-lg border px-2.5 text-sm focus:outline-none ${
-                              rowErr ? "border-[#c94242]" : "border-slate-200"
-                            }`}
-                          />
-                          <span className="text-xs text-slate-400">/ {assessment.maxScore}</span>
-                        </div>
-                        {rowErr && (
-                          <p className="mt-1 text-xs text-[#c94242]">{rowErr}</p>
-                        )}
+                        <span className="font-semibold text-slate-700">{row.score !== null ? row.score : "-"}</span>
+                        <span className="text-xs text-slate-400"> / {assessment.maxScore}</span>
                       </td>
                       <td className="px-5 py-4">
-                        <input
-                          type="text"
-                          value={feedbackVal}
-                          onChange={(e) =>
-                            setScoreInputs((prev) => ({
-                              ...prev,
-                              [row.studentId]: {
-                                score: prev[row.studentId]?.score ?? "",
-                                feedback: e.target.value,
-                              },
-                            }))
-                          }
-                          placeholder="Catatan opsional..."
-                          className="h-9 w-full min-w-40 rounded-lg border border-slate-200 px-3 text-xs focus:outline-none"
-                        />
+                        <span className="text-sm text-slate-600">{row.feedback || "-"}</span>
                       </td>
-                      <td className="px-5 py-4">
-                        <span
-                          className={`inline-flex rounded-full px-2.5 py-0.5 text-xs font-semibold ${
-                            isScored
-                              ? "bg-emerald-50 text-emerald-700 border border-emerald-200"
-                              : "bg-[#fff6d9] text-[#a57c00] border border-[#f5df9e]"
-                          }`}
-                        >
-                          {isScored ? "SCORED" : "NOT SCORED"}
-                        </span>
-                      </td>
-                      <td className="px-5 py-4">
-                        <div className="flex items-center gap-2">
-                          <button
-                            type="button"
-                            disabled={isSaving}
-                            onClick={() => handleSaveScore(row.studentId, row.scoreId)}
-                            className="inline-flex items-center gap-1.5 rounded-lg bg-[#102f50] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#0c233c] disabled:opacity-50"
-                          >
-                            <Save className="size-3.5" />
-                            {isSaving ? "Menyimpan..." : row.scoreId ? "Update" : "Simpan"}
-                          </button>
-                          {canDeleteScores && row.scoreId && (
-                            <SoftDeleteAction
-                              endpoint={`/api/assessments/${assessmentId}/scores/${row.scoreId}`}
-                              recordName="Nilai"
-                              identifier={`${row.studentName} / ${row.nim}`}
-                              description="Nilai akan disembunyikan dari data aktif. Riwayat penilaian tetap tersimpan."
-                              onDeleted={fetchAssessment}
-                            />
-                          )}
-                        </div>
-                      </td>
+                      {(!isStudent || canCreateScores || canDeleteScores) && (
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            {canCreateScores && (
+                              <button
+                                type="button"
+                                onClick={() => setScoreModal({
+                                  isOpen: true,
+                                  scoreId: row.scoreId,
+                                  studentId: row.studentId,
+                                  score: row.score !== null ? String(row.score) : "",
+                                  feedback: row.feedback || ""
+                                })}
+                                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 px-3 py-1.5 text-xs font-semibold text-slate-600 hover:bg-slate-50"
+                              >
+                                <Edit2 className="size-3.5" />
+                                Edit
+                              </button>
+                            )}
+                            {canDeleteScores && row.scoreId && (
+                              <SoftDeleteAction
+                                endpoint={`/api/assessments/${assessmentId}/scores/${row.scoreId}`}
+                                recordName="Nilai"
+                                identifier={`${row.studentName} / ${row.nim}`}
+                                description="Nilai akan disembunyikan dari data aktif. Riwayat penilaian tetap tersimpan."
+                                onDeleted={fetchAssessment}
+                              />
+                            )}
+                          </div>
+                        </td>
+                      )}
                     </tr>
                   );
                 })}
@@ -588,6 +552,94 @@ export function AssessmentDetail({
           </div>
         )}
       </section>
+
+      {/* Modal Berikan Nilai */}
+      {scoreModal.isOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center overflow-y-auto bg-slate-950/40 p-4" role="dialog" aria-modal="true">
+          <form onSubmit={handleSaveModal} className="w-full max-w-lg rounded-xl bg-white p-6 shadow-xl">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h2 className="font-bold text-[#102f50]">
+                {scoreModal.scoreId ? "Edit Nilai Peserta" : "Berikan Nilai Peserta"}
+              </h2>
+              <button type="button" onClick={closeScoreModal} disabled={submitLoading} className="text-slate-400 hover:text-slate-600">
+                <X className="size-5" />
+              </button>
+            </div>
+
+            {submitError && (
+              <div className="mt-4 rounded-lg border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+                {submitError}
+              </div>
+            )}
+
+            <div className="mt-4 grid gap-4">
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">Peserta *</label>
+                <select
+                  value={scoreModal.studentId}
+                  onChange={(e) => setScoreModal(prev => ({ ...prev, studentId: e.target.value }))}
+                  disabled={submitLoading || !!scoreModal.scoreId}
+                  className={`mt-1 h-10 w-full rounded-lg border bg-white px-3 text-sm focus:outline-none ${formErrors.studentId ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                >
+                  <option value="" disabled>Pilih Peserta</option>
+                  {enrolledStudents.map(st => (
+                    <option key={st.id} value={st.id}>{st.name} — {st.nim}</option>
+                  ))}
+                  {/* Fallback for existing scored student not in enrolledList */}
+                  {scoreModal.studentId && !enrolledStudents.some(st => st.id === scoreModal.studentId) && (
+                    <option value={scoreModal.studentId}>
+                      {rows.find(r => r.studentId === scoreModal.studentId)?.studentName || "Peserta"} — {rows.find(r => r.studentId === scoreModal.studentId)?.nim || "-"}
+                    </option>
+                  )}
+                </select>
+                {formErrors.studentId && <p className="mt-1 text-xs text-red-600">{formErrors.studentId}</p>}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">Nilai *</label>
+                <div className="relative mt-1">
+                  <input
+                    type="number"
+                    min="0"
+                    max={assessment.maxScore}
+                    value={scoreModal.score}
+                    onChange={(e) => setScoreModal(prev => ({ ...prev, score: e.target.value }))}
+                    disabled={submitLoading}
+                    placeholder={`0 - ${assessment.maxScore}`}
+                    className={`h-10 w-full rounded-lg border bg-white px-3 pr-12 text-sm focus:outline-none ${formErrors.score ? "border-red-500" : "border-slate-200 focus:border-[#102f50]"}`}
+                  />
+                  <span className="pointer-events-none absolute inset-y-0 right-3 flex items-center text-xs text-slate-400">
+                    / {assessment.maxScore}
+                  </span>
+                </div>
+                {formErrors.score && <p className="mt-1 text-xs text-red-600">{formErrors.score}</p>}
+              </div>
+
+              <div>
+                <label className="block text-xs font-semibold text-slate-700">Catatan</label>
+                <input
+                  type="text"
+                  value={scoreModal.feedback}
+                  onChange={(e) => setScoreModal(prev => ({ ...prev, feedback: e.target.value }))}
+                  disabled={submitLoading}
+                  placeholder="Catatan nilai / feedback opsional"
+                  className="mt-1 h-10 w-full rounded-lg border border-slate-200 bg-white px-3 text-sm focus:border-[#102f50] focus:outline-none"
+                />
+              </div>
+            </div>
+
+            <div className="mt-6 flex justify-end gap-3 border-t border-slate-100 pt-4">
+              <button type="button" onClick={closeScoreModal} disabled={submitLoading} className="rounded-lg border border-slate-200 px-4 py-2 text-sm font-semibold text-slate-600 hover:bg-slate-50 transition">
+                Batal
+              </button>
+              <button type="submit" disabled={submitLoading} className="inline-flex items-center gap-2 rounded-lg bg-[#c94242] px-4 py-2 text-sm font-semibold text-white shadow-sm hover:bg-[#a83232] transition disabled:opacity-50">
+                {submitLoading && <Loader2 className="size-4 animate-spin" />}
+                Simpan Nilai
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
       {deleteOpen && (
         <DeleteConfirmationDialog
           recordName={assessment.name}

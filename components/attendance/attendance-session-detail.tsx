@@ -66,10 +66,14 @@ export function AttendanceSessionDetail({
   scheduleId,
   canDelete = false,
   canMutate = false,
+  isStudent = false,
+  currentStudentId,
 }: {
   scheduleId: string;
   canDelete?: boolean;
   canMutate?: boolean;
+  isStudent?: boolean;
+  currentStudentId?: string;
 }) {
   const [schedule, setSchedule] = useState<ApiScheduleSummary | null>(null);
   const [attendances, setAttendances] = useState<ApiAttendanceItem[]>([]);
@@ -94,22 +98,32 @@ export function AttendanceSessionDetail({
 
     async function loadSessionData() {
       try {
-        const [schedRes, attRes, studRes, enrRes] = await Promise.all([
+        const fetchPromises: Promise<Response>[] = [
           fetch(`/api/schedules/${scheduleId}`, { headers: { Accept: "application/json" } }),
           fetch(`/api/attendances?scheduleId=${scheduleId}`, { headers: { Accept: "application/json" } }),
-          fetch("/api/students", { headers: { Accept: "application/json" } }),
-          fetch("/api/enrollments", { headers: { Accept: "application/json" } }),
-        ]);
+        ];
+
+        if (!isStudent) {
+          fetchPromises.push(
+            fetch("/api/students", { headers: { Accept: "application/json" } }),
+            fetch("/api/enrollments", { headers: { Accept: "application/json" } }),
+          );
+        }
+
+        const results = await Promise.all(fetchPromises);
+        const schedRes = results[0];
+        const attRes = results[1];
+        const studRes = !isStudent ? results[2] : null;
+        const enrRes = !isStudent ? results[3] : null;
 
         if (ignore) return;
 
         if (
           schedRes.status === 401 ||
           attRes.status === 401 ||
-          studRes.status === 401 ||
           schedRes.status === 403 ||
           attRes.status === 403 ||
-          studRes.status === 403
+          (!isStudent && (studRes?.status === 401 || studRes?.status === 403))
         ) {
           setUnauthorized(true);
           setError("Akses tidak diizinkan untuk melihat atau mengelola absensi sesi ini.");
@@ -134,19 +148,21 @@ export function AttendanceSessionDetail({
           return;
         }
 
-        const [schedJson, attJson, studJson, enrJson] = await Promise.all([
-          schedRes.json(),
-          attRes.json(),
-          studRes.json(),
-          enrRes.json(),
-        ]);
+        const schedJson = await schedRes.json();
+        const attJson = await attRes.json();
+        const studJson = studRes ? await studRes.json() : null;
+        const enrJson = enrRes ? await enrRes.json() : null;
 
         if (ignore) return;
 
         setSchedule(schedJson.data ?? null);
         setAttendances(Array.isArray(attJson.data) ? attJson.data : []);
-        setStudents(Array.isArray(studJson.data) ? studJson.data : []);
-        setEnrollments(Array.isArray(enrJson.data) ? enrJson.data : []);
+        if (studJson) {
+          setStudents(Array.isArray(studJson.data) ? studJson.data : []);
+        }
+        if (enrJson) {
+          setEnrollments(Array.isArray(enrJson.data) ? enrJson.data : []);
+        }
       } catch (err) {
         if (ignore) return;
         setError(err instanceof Error ? err.message : "Terjadi kesalahan jaringan.");
@@ -162,24 +178,46 @@ export function AttendanceSessionDetail({
     return () => {
       ignore = true;
     };
-  }, [scheduleId, reloadKey]);
+  }, [scheduleId, reloadKey, isStudent]);
 
   // Resolve students that belong to this schedule's batch
   const sessionStudents = useMemo(() => {
     if (!schedule) return [];
+
+    if (isStudent) {
+      if (attendances.length > 0) {
+        const myAtt = currentStudentId
+          ? attendances.find((a) => a.studentId === currentStudentId)
+          : attendances[0];
+        if (myAtt) {
+          return [
+            {
+              id: myAtt.student.id,
+              nim: myAtt.student.nim,
+              name: myAtt.student.name,
+            },
+          ];
+        }
+      }
+      return [];
+    }
+
+    let filtered: StudentItem[] = [];
     const batchId = schedule.class?.batch?.id;
-    if (!batchId) return students;
+    if (!batchId) {
+      filtered = students;
+    } else {
+      const enrolledStudentIds = new Set(
+        enrollments
+          .filter((e) => e.batchId === batchId && e.status === "ACTIVE")
+          .map((e) => e.studentId),
+      );
+      const batchStudents = students.filter((s) => enrolledStudentIds.has(s.id));
+      filtered = batchStudents.length > 0 ? batchStudents : students;
+    }
 
-    const enrolledStudentIds = new Set(
-      enrollments
-        .filter((e) => e.batchId === batchId && e.status === "ACTIVE")
-        .map((e) => e.studentId),
-    );
-
-    const filtered = students.filter((s) => enrolledStudentIds.has(s.id));
-    // If enrollments filter returned students, use them; otherwise fallback to all students
-    return filtered.length > 0 ? filtered : students;
-  }, [enrollments, schedule, students]);
+    return filtered;
+  }, [attendances, currentStudentId, enrollments, isStudent, schedule, students]);
 
   // Map studentId to existing attendance
   const attendanceMap = useMemo(() => {
@@ -224,7 +262,7 @@ export function AttendanceSessionDetail({
     choice: UIStatusChoice,
     lateMinutesInput?: number,
   ) => {
-    if (choice === "UNMARKED") return;
+    if (isStudent || !canMutate || choice === "UNMARKED") return;
 
     setSavingId(studentId);
     setNotice(null);
@@ -302,6 +340,7 @@ export function AttendanceSessionDetail({
   };
 
   const handleSetAllPresent = async () => {
+    if (isStudent || !canMutate) return;
     if (!window.confirm("Tandai semua peserta sesi ini sebagai HADIR (PRESENT)?")) return;
 
     setSavingId("ALL");
@@ -445,13 +484,13 @@ export function AttendanceSessionDetail({
             Dashboard / Attendance / <span className="font-mono">{schedule.id}</span>
           </p>
           <h1 className="mt-2 text-2xl font-bold tracking-tight text-[#102f50]">
-            {subjectName}
+            {isStudent ? "Kehadiran Saya" : subjectName}
           </h1>
           <p className="mt-1 text-sm text-slate-500">
-            {batchName} · {formattedDate} ({startTime} - {endTime})
+            {isStudent ? `${subjectName} · ` : ""}{batchName} · {formattedDate} ({startTime} - {endTime})
           </p>
         </div>
-        {canMutate && (
+        {!isStudent && canMutate && (
           <button
             type="button"
             onClick={handleSetAllPresent}
@@ -496,28 +535,32 @@ export function AttendanceSessionDetail({
       </section>
 
       {/* Summary Counts Section */}
-      <section className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
-        <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
-          <CheckCircle2 className="size-4 text-[#c94242]" />
-          <h2 className="font-bold text-[#102f50]">Ringkasan Kehadiran Sesi</h2>
-        </div>
-        <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3 lg:grid-cols-6">
-          <CountCard label="Hadir (Present)" count={summaryCounts.PRESENT} tone="emerald" />
-          <CountCard label="Terlambat (Late)" count={summaryCounts.LATE} tone="amber" />
-          <CountCard label="Sakit (Sick)" count={summaryCounts.SICK} tone="blue" />
-          <CountCard label="Izin (Permitted)" count={summaryCounts.PERMITTED} tone="cyan" />
-          <CountCard label="Alpha (Unexcused)" count={summaryCounts.UNEXCUSED} tone="rose" />
-          <CountCard label="Belum Diisi" count={summaryCounts.UNMARKED} tone="slate" />
-        </div>
-      </section>
+      {!isStudent && (
+        <section className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
+          <div className="flex items-center gap-2 border-b border-slate-100 px-5 py-3.5">
+            <CheckCircle2 className="size-4 text-[#c94242]" />
+            <h2 className="font-bold text-[#102f50]">Ringkasan Kehadiran Sesi</h2>
+          </div>
+          <div className="grid grid-cols-2 gap-3 p-5 sm:grid-cols-3 lg:grid-cols-6">
+            <CountCard label="Hadir (Present)" count={summaryCounts.PRESENT} tone="emerald" />
+            <CountCard label="Terlambat (Late)" count={summaryCounts.LATE} tone="amber" />
+            <CountCard label="Sakit (Sick)" count={summaryCounts.SICK} tone="blue" />
+            <CountCard label="Izin (Permitted)" count={summaryCounts.PERMITTED} tone="cyan" />
+            <CountCard label="Alpha (Unexcused)" count={summaryCounts.UNEXCUSED} tone="rose" />
+            <CountCard label="Belum Diisi" count={summaryCounts.UNMARKED} tone="slate" />
+          </div>
+        </section>
+      )}
 
       {/* Participants Table */}
       <section className="mt-6 rounded-xl border border-slate-200 bg-white shadow-sm">
         <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4">
           <div>
-            <h2 className="font-bold text-[#102f50]">Daftar Mahasiswa ({sessionStudents.length})</h2>
+            <h2 className="font-bold text-[#102f50]">
+              {isStudent ? "Kehadiran Saya" : `Daftar Mahasiswa (${sessionStudents.length})`}
+            </h2>
             <p className="mt-0.5 text-xs text-slate-500">
-              Input status kehadiran per mahasiswa untuk sesi ini
+              {isStudent ? "Status kehadiran Anda pada sesi ini" : "Input status kehadiran per mahasiswa untuk sesi ini"}
             </p>
           </div>
           <button
@@ -530,90 +573,108 @@ export function AttendanceSessionDetail({
           </button>
         </div>
 
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-175 text-left text-sm">
-            <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
-              <tr>
-                <th className="px-5 py-3 font-semibold">NIM</th>
-                <th className="px-5 py-3 font-semibold">Nama Mahasiswa</th>
-                <th className="px-5 py-3 font-semibold">Status Saat Ini</th>
-                <th className="px-5 py-3 font-semibold">Tandai Kehadiran</th>
-                {canDelete && <th className="px-5 py-3 font-semibold">Aksi</th>}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-slate-100">
-              {sessionStudents.map((student) => {
-                const att = attendanceMap.get(student.id);
-                const isSaving = savingId === student.id;
+        {sessionStudents.length === 0 ? (
+          <div className="flex flex-col items-center justify-center px-5 py-16 text-center">
+            <div className="rounded-full bg-slate-100 p-3 text-slate-400">
+              <AlertCircle className="size-6" />
+            </div>
+            <h3 className="mt-3 text-base font-bold text-[#102f50]">
+              {isStudent ? "Belum Ada Catatan Kehadiran" : "Belum Ada Mahasiswa"}
+            </h3>
+            <p className="mt-1 max-w-md text-xs text-slate-500">
+              {isStudent
+                ? "Catatan kehadiran Anda belum dicatat untuk sesi training ini."
+                : "Belum ada mahasiswa yang terdaftar pada sesi training ini."}
+            </p>
+          </div>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-175 text-left text-sm">
+              <thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500">
+                <tr>
+                  <th className="px-5 py-3 font-semibold">NIM</th>
+                  <th className="px-5 py-3 font-semibold">Nama Mahasiswa</th>
+                  <th className="px-5 py-3 font-semibold">{isStudent ? "Status Kehadiran" : "Status Saat Ini"}</th>
+                  {!isStudent && canMutate && <th className="px-5 py-3 font-semibold">Tandai Kehadiran</th>}
+                  {!isStudent && canDelete && <th className="px-5 py-3 font-semibold">Aksi</th>}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {sessionStudents.map((student) => {
+                  const att = attendanceMap.get(student.id);
+                  const isSaving = savingId === student.id;
 
-                let currentChoice: UIStatusChoice = "UNMARKED";
-                if (att) {
-                  if (att.status === "PRESENT") currentChoice = "PRESENT";
-                  else if (att.status === "LATE") currentChoice = "LATE";
-                  else if (att.status === "ABSENT") {
-                    if (att.absenceType === "SICK") currentChoice = "ABSENT_SICK";
-                    else if (att.absenceType === "PERMITTED") currentChoice = "ABSENT_PERMITTED";
-                    else if (att.absenceType === "UNEXCUSED") currentChoice = "ABSENT_UNEXCUSED";
+                  let currentChoice: UIStatusChoice = "UNMARKED";
+                  if (att) {
+                    if (att.status === "PRESENT") currentChoice = "PRESENT";
+                    else if (att.status === "LATE") currentChoice = "LATE";
+                    else if (att.status === "ABSENT") {
+                      if (att.absenceType === "SICK") currentChoice = "ABSENT_SICK";
+                      else if (att.absenceType === "PERMITTED") currentChoice = "ABSENT_PERMITTED";
+                      else if (att.absenceType === "UNEXCUSED") currentChoice = "ABSENT_UNEXCUSED";
+                    }
                   }
-                }
 
-                return (
-                  <tr key={student.id} className="hover:bg-slate-50/50">
-                    <td className="px-5 py-4 font-mono text-xs font-semibold text-[#123b63]">
-                      {student.nim}
-                    </td>
-                    <td className="px-5 py-4">
-                      <p className="font-semibold text-[#102f50]">{student.name}</p>
-                    </td>
-                    <td className="px-5 py-4">
-                      <CurrentStatusBadge att={att} />
-                    </td>
-                    <td className="px-5 py-4">
-                      <div className="flex items-center gap-2">
-                        <select
-                          value={currentChoice}
-                          disabled={isSaving}
-                          onChange={(e) => {
-                            const val = e.target.value as UIStatusChoice;
-                            if (val === "LATE") {
-                              const minutes = window.prompt("Jumlah menit keterlambatan (integer >= 1):", "10");
-                              const num = minutes ? parseInt(minutes, 10) : 10;
-                              updateAttendanceForStudent(student.id, val, isNaN(num) || num < 1 ? 10 : num);
-                            } else {
-                              updateAttendanceForStudent(student.id, val);
-                            }
-                          }}
-                          className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-[#102f50] focus:outline-none disabled:opacity-50"
-                        >
-                          <option value="UNMARKED">Pilih Status Kehadiran</option>
-                          <option value="PRESENT">Hadir (PRESENT)</option>
-                          <option value="LATE">Terlambat (LATE)</option>
-                          <option value="ABSENT_SICK">Sakit (ABSENT - SICK)</option>
-                          <option value="ABSENT_PERMITTED">Izin (ABSENT - PERMITTED)</option>
-                          <option value="ABSENT_UNEXCUSED">Alpha (ABSENT - UNEXCUSED)</option>
-                        </select>
-                        {isSaving && <Loader2 className="size-4 animate-spin text-[#102f50]" />}
-                      </div>
-                    </td>
-                    {canDelete && (
-                      <td className="px-5 py-4">
-                        {att && (
-                          <SoftDeleteAction
-                            endpoint={`/api/attendances/${att.id}`}
-                            recordName="Kehadiran"
-                            identifier={`${student.name} / ${student.nim}`}
-                            description="Data kehadiran akan disembunyikan dari data aktif. Riwayat sesi dan peserta tetap tersimpan."
-                            onDeleted={() => setAttendances((previous) => previous.filter((item) => item.id !== att.id))}
-                          />
-                        )}
+                  return (
+                    <tr key={student.id} className="hover:bg-slate-50/50">
+                      <td className="px-5 py-4 font-mono text-xs font-semibold text-[#123b63]">
+                        {student.nim}
                       </td>
-                    )}
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
-        </div>
+                      <td className="px-5 py-4">
+                        <p className="font-semibold text-[#102f50]">{student.name}</p>
+                      </td>
+                      <td className="px-5 py-4">
+                        <CurrentStatusBadge att={att} />
+                      </td>
+                      {!isStudent && canMutate && (
+                        <td className="px-5 py-4">
+                          <div className="flex items-center gap-2">
+                            <select
+                              value={currentChoice}
+                              disabled={isSaving}
+                              onChange={(e) => {
+                                const val = e.target.value as UIStatusChoice;
+                                if (val === "LATE") {
+                                  const minutes = window.prompt("Jumlah menit keterlambatan (integer >= 1):", "10");
+                                  const num = minutes ? parseInt(minutes, 10) : 10;
+                                  updateAttendanceForStudent(student.id, val, isNaN(num) || num < 1 ? 10 : num);
+                                } else {
+                                  updateAttendanceForStudent(student.id, val);
+                                }
+                              }}
+                              className="h-9 rounded-lg border border-slate-200 bg-white px-3 text-xs font-medium text-slate-700 focus:border-[#102f50] focus:outline-none disabled:opacity-50"
+                            >
+                              <option value="UNMARKED">Pilih Status Kehadiran</option>
+                              <option value="PRESENT">Hadir (PRESENT)</option>
+                              <option value="LATE">Terlambat (LATE)</option>
+                              <option value="ABSENT_SICK">Sakit (ABSENT - SICK)</option>
+                              <option value="ABSENT_PERMITTED">Izin (ABSENT - PERMITTED)</option>
+                              <option value="ABSENT_UNEXCUSED">Alpha (ABSENT - UNEXCUSED)</option>
+                            </select>
+                            {isSaving && <Loader2 className="size-4 animate-spin text-[#102f50]" />}
+                          </div>
+                        </td>
+                      )}
+                      {!isStudent && canDelete && (
+                        <td className="px-5 py-4">
+                          {att && (
+                            <SoftDeleteAction
+                              endpoint={`/api/attendances/${att.id}`}
+                              recordName="Kehadiran"
+                              identifier={`${student.name} / ${student.nim}`}
+                              description="Data kehadiran akan disembunyikan dari data aktif. Riwayat sesi dan peserta tetap tersimpan."
+                              onDeleted={() => setAttendances((previous) => previous.filter((item) => item.id !== att.id))}
+                            />
+                          )}
+                        </td>
+                      )}
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        )}
       </section>
     </div>
   );

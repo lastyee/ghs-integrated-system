@@ -1,15 +1,21 @@
 import { z } from "zod";
 import { AssessmentType, AssessmentSessionStatus } from "@prisma/client";
 
-export const assessmentCreateSchema = z.object({
-  classId: z.string().trim().min(1, "Class ID is required"),
-  subjectId: z.string().trim().min(1, "Subject ID is required"),
-  name: z.string().trim().min(1, "Name is required"),
-  description: z.string().trim().nullable().optional(),
-  type: z.nativeEnum(AssessmentType),
-  maxScore: z.number().finite().gt(0, "Maximum score must be greater than 0"),
-  status: z.nativeEnum(AssessmentSessionStatus).default(AssessmentSessionStatus.OPEN).optional(),
-});
+export const assessmentCreateSchema = z
+  .object({
+    classId: z.string().trim().min(1).optional(),
+    studentId: z.string().trim().min(1).optional(),
+    subjectId: z.string().trim().min(1, "Subject ID is required"),
+    name: z.string().trim().min(1, "Name is required"),
+    description: z.string().trim().nullable().optional(),
+    type: z.nativeEnum(AssessmentType),
+    maxScore: z.number().finite().gt(0, "Maximum score must be greater than 0"),
+    status: z.nativeEnum(AssessmentSessionStatus).default(AssessmentSessionStatus.OPEN).optional(),
+  })
+  .refine((data) => Boolean(data.classId || data.studentId), {
+    message: "Peserta atau kelas wajib ditentukan.",
+    path: ["studentId"],
+  });
 
 export const assessmentUpdateSchema = z.object({
   classId: z.string().trim().min(1).optional(),
