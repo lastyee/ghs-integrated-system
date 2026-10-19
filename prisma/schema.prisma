@@ -436,8 +436,10 @@ model Document {
   updatedAt DateTime @updatedAt
 
   deletedAt DateTime?
+  storagePurgedAt DateTime?
 
   @@index([studentId])
+  @@index([deletedAt, storagePurgedAt])
   @@map("documents")
 }
 
