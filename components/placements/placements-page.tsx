@@ -207,19 +207,21 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
   // Unauthorized State
   if (unauthorized || isForbiddenRole) {
     return (
-      <div
-        data-testid="unauthorized-state"
-        className="rounded-xl border border-rose-200 bg-white p-8 text-center shadow-sm"
-      >
-        <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
-          <AlertCircle className="size-6" />
+      <div className="mx-auto max-w-7xl p-4 sm:p-8">
+        <div
+          data-testid="unauthorized-state"
+          className="rounded-xl border border-rose-200 bg-white p-8 text-center shadow-sm"
+        >
+          <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+            <AlertCircle className="size-6" />
+          </div>
+          <h3 className="mt-4 text-base font-bold text-slate-800">
+            Akses Tidak Diizinkan
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">
+            Anda tidak memiliki wewenang untuk mengakses modul Penempatan Kerja.
+          </p>
         </div>
-        <h3 className="mt-4 text-base font-bold text-slate-800">
-          Akses Tidak Diizinkan
-        </h3>
-        <p className="mt-1 text-sm text-slate-500">
-          Anda tidak memiliki wewenang untuk mengakses modul Penempatan Kerja.
-        </p>
       </div>
     );
   }
@@ -227,72 +229,52 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
   // Error State
   if (error && !loading) {
     return (
-      <div
-        data-testid="error-state"
-        className="rounded-xl border border-rose-200 bg-white p-8 text-center shadow-sm"
-      >
-        <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
-          <AlertCircle className="size-6" />
-        </div>
-        <h3 className="mt-4 text-base font-bold text-slate-800">
-          Terjadi Kesalahan
-        </h3>
-        <p className="mt-1 text-sm text-slate-500">{error}</p>
-        <button
-          type="button"
-          onClick={() => setRefreshTrigger((prev) => prev + 1)}
-          className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-4 py-2 text-xs font-semibold text-white hover:bg-[#1a4470]"
+      <div className="mx-auto max-w-7xl p-4 sm:p-8">
+        <div
+          data-testid="error-state"
+          className="rounded-xl border border-rose-200 bg-white p-8 text-center shadow-sm"
         >
-          <RotateCcw className="size-3.5" />
-          Coba Lagi
-        </button>
+          <div className="mx-auto flex size-12 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+            <AlertCircle className="size-6" />
+          </div>
+          <h3 className="mt-4 text-base font-bold text-slate-800">
+            Terjadi Kesalahan
+          </h3>
+          <p className="mt-1 text-sm text-slate-500">{error}</p>
+          <button
+            type="button"
+            onClick={() => setRefreshTrigger((prev) => prev + 1)}
+            className="mt-4 inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-4 py-2 text-xs font-semibold text-white hover:bg-[#1a4470]"
+          >
+            <RotateCcw className="size-3.5" />
+            Coba Lagi
+          </button>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="space-y-6">
-      {/* Top Header & Action Controls */}
-      <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-        <div>
-          <h1 className="text-xl font-bold tracking-tight text-[#102f50]">
-            {isStudent ? "Penempatan Kerja Saya" : "Daftar Penempatan Kerja"}
-          </h1>
-          <p className="mt-0.5 text-xs text-slate-500">
-            {isStudent
-              ? "Informasi penempatan kerja dan status keberangkatan Anda"
-              : "Kelola status kesiapan, keberangkatan, dan penempatan kerja peserta"}
-          </p>
-        </div>
-
-        {isStaff && (
-          <button
-            type="button"
-            onClick={() => setIsCreateOpen(true)}
-            data-testid="create-placement-trigger"
-            className="inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-4 py-2.5 text-xs font-semibold text-white shadow-xs hover:bg-[#1a4470] focus:ring-2 focus:ring-[#102f50] focus:ring-offset-2 focus:outline-hidden"
-          >
-            <Plus className="size-4" />
-            Catat Penempatan
-          </button>
-        )}
-      </div>
-
+    <div className="mx-auto max-w-7xl p-4 sm:p-8 space-y-6">
       {/* Filter and Search Bar */}
       <div className="flex flex-col gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-xs sm:flex-row sm:items-center sm:justify-between">
-        <div className="relative flex-1">
+        <div className="relative flex-1 min-w-0 w-full">
           <Search className="pointer-events-none absolute top-2.5 left-3 size-4 text-slate-400" />
           <input
             type="text"
-            placeholder="Cari peserta, NIM, perusahaan, posisi..."
+            placeholder={
+              isStudent
+                ? "Cari perusahaan, posisi..."
+                : "Cari peserta, NIM, perusahaan, posisi..."
+            }
             data-testid="placement-search-input"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="block w-full rounded-lg border border-slate-200 py-2 pr-3 pl-9 text-xs text-slate-800 placeholder-slate-400 focus:border-[#102f50] focus:ring-1 focus:ring-[#102f50] focus:outline-hidden"
+            className="block w-full min-w-0 rounded-lg border border-slate-200 py-2 pr-3 pl-9 text-xs text-slate-800 placeholder-slate-400 focus:border-[#102f50] focus:ring-1 focus:ring-[#102f50] focus:outline-hidden"
           />
         </div>
 
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 sm:shrink-0">
           <select
             value={statusFilter}
             onChange={(e) => {
@@ -323,6 +305,17 @@ export function PlacementsPage({ userRole }: PlacementsPageProps) {
             >
               <RotateCcw className="size-3" />
               Reset
+            </button>
+          )}
+          {isStaff && (
+            <button
+              type="button"
+              onClick={() => setIsCreateOpen(true)}
+              data-testid="create-placement-trigger"
+              className="inline-flex items-center gap-1.5 rounded-lg bg-[#102f50] px-3.5 py-2 text-xs font-semibold text-white shadow-xs hover:bg-[#1a4470] focus:ring-2 focus:ring-[#102f50] focus:ring-offset-2 focus:outline-hidden"
+            >
+              <Plus className="size-4" />
+              Catat Penempatan
             </button>
           )}
         </div>

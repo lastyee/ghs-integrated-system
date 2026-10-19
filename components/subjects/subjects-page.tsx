@@ -233,7 +233,7 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
         )}
       </div>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2">
         <StatCard
           label="Total Mata Pelajaran"
           value={loading ? "..." : String(subjects.length)}
@@ -245,13 +245,6 @@ export function SubjectsPage({ userRole }: SubjectsPageProps) {
           label="Mata Pelajaran Ditampilkan"
           value={loading ? "..." : String(total)}
           description="Hasil filter & pencarian"
-          icon={BookOpen}
-          tone="blue"
-        />
-        <StatCard
-          label="Status Database"
-          value="LIVE API"
-          description="Terhubung langsung ke backend Academic Core"
           icon={BookOpen}
           tone="blue"
         />

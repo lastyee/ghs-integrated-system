@@ -7,7 +7,6 @@ import {
 } from "@/lib/authorization";
 import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { StatCard } from "@/components/dashboard/stat-card";
-import { SystemOverview } from "@/components/dashboard/system-overview";
 import { AppShell } from "@/components/layout/app-shell";
 import { FileCheck2, GraduationCap, Users, ClipboardCheck } from "lucide-react";
 
@@ -37,48 +36,14 @@ export default async function DashboardHubPage() {
 
   await Promise.all([
     requirePermission("student:read"),
-    requirePermission("batch:read"),
-    requirePermission("document:read"),
     requirePermission("audit:read"),
   ]);
 
-  const [
-    userCount,
-    studentCount,
-    pendingDocumentCount,
-    auditCount,
-    programCount,
-    classCount,
-    scheduleCount,
-    recentLogs,
-  ] =
+  const [userCount, studentCount, auditCount, recentLogs] =
     await Promise.all([
       prisma.user.count({ where: { deletedAt: null } }),
       prisma.student.count({ where: { deletedAt: null, status: "ACTIVE" } }),
-      prisma.document.count({
-        where: { deletedAt: null, student: { deletedAt: null }, status: "PENDING" },
-      }),
       prisma.auditLog.count(),
-      prisma.program.count({ where: { deletedAt: null } }),
-      prisma.class.count({
-        where: {
-          deletedAt: null,
-          batch: { program: { deletedAt: null } },
-          instructor: { deletedAt: null },
-        },
-      }),
-      prisma.schedule.count({
-        where: {
-          deletedAt: null,
-          subject: { deletedAt: null },
-          instructor: { deletedAt: null },
-          class: {
-            deletedAt: null,
-            batch: { program: { deletedAt: null } },
-            instructor: { deletedAt: null },
-          },
-        },
-      }),
       prisma.auditLog.findMany({
         select: {
           id: true,
@@ -124,16 +89,8 @@ export default async function DashboardHubPage() {
             />
           ))}
         </section>
-        <div className="mt-6 grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(340px,0.65fr)]">
+        <div className="mt-6">
           <RecentActivity entries={recentLogs} />
-          <SystemOverview
-            items={[
-              { label: "Programs", value: programCount },
-              { label: "Classes", value: classCount },
-              { label: "Schedules", value: scheduleCount },
-              { label: "Pending documents", value: pendingDocumentCount },
-            ]}
-          />
         </div>
       </div>
     </AppShell>

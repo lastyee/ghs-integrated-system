@@ -41,6 +41,24 @@ function formatUtcTime(timeStr: string): string {
   return timeStr.substring(0, 5);
 }
 
+function BackButton() {
+  return (
+    <Link
+      href="/schedules"
+      onClick={(e) => {
+        if (typeof window !== "undefined" && window.history.length > 1) {
+          e.preventDefault();
+          window.history.back();
+        }
+      }}
+      className="inline-flex items-center gap-2 text-sm font-semibold text-[#123b63] transition-colors hover:text-[#c94242]"
+    >
+      <ArrowLeft className="size-4" />
+      Kembali
+    </Link>
+  );
+}
+
 export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   const [schedule, setSchedule] = useState<ApiSchedule | null>(null);
   const [loading, setLoading] = useState(true);
@@ -101,13 +119,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   if (loading) {
     return (
       <div className="mx-auto max-w-4xl p-4 sm:p-8">
-        <Link
-          href="/schedules"
-          className="inline-flex items-center gap-2 text-sm font-semibold text-[#123b63] hover:text-[#c94242]"
-        >
-          <ArrowLeft className="size-4" />
-          Kembali ke Jadwal
-        </Link>
+        <BackButton />
         <div className="mt-8 flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-16 text-center shadow-sm">
           <Loader2 className="size-8 animate-spin text-[#102f50]" />
           <p className="mt-3 text-sm font-medium text-slate-700">Memuat detail jadwal...</p>
@@ -119,13 +131,7 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   if (unauthorized) {
     return (
       <div className="mx-auto max-w-4xl p-4 sm:p-8">
-        <Link
-          href="/schedules"
-          className="inline-flex items-center gap-2 text-sm font-semibold text-[#123b63] hover:text-[#c94242]"
-        >
-          <ArrowLeft className="size-4" />
-          Kembali ke Jadwal
-        </Link>
+        <BackButton />
         <div className="mt-8 flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm">
           <div className="rounded-full bg-amber-100 p-3 text-amber-700">
             <Lock className="size-6" />
@@ -148,20 +154,14 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   if (notFound || !schedule) {
     return (
       <div className="mx-auto max-w-4xl p-4 sm:p-8">
-        <Link
-          href="/schedules"
-          className="inline-flex items-center gap-2 text-sm font-semibold text-[#123b63] hover:text-[#c94242]"
-        >
-          <ArrowLeft className="size-4" />
-          Kembali ke Jadwal
-        </Link>
+        <BackButton />
         <div className="mt-8 flex flex-col items-center justify-center rounded-xl border border-slate-200 bg-white p-12 text-center shadow-sm">
           <div className="rounded-full bg-slate-100 p-3 text-slate-400">
             <AlertCircle className="size-6" />
           </div>
           <h2 className="mt-3 text-lg font-bold text-[#102f50]">Jadwal Tidak Ditemukan</h2>
           <p className="mt-1 text-xs text-slate-500">
-            Jadwal dengan ID <span className="font-mono">{scheduleId}</span> tidak ditemukan di database.
+            Jadwal dengan ID <span className="font-mono">{scheduleId}</span> tidak ditemukan atau Anda tidak memiliki akses ke jadwal ini.
           </p>
           <Link
             href="/schedules"
@@ -186,19 +186,20 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
   return (
     <div className="mx-auto max-w-4xl p-4 sm:p-8">
       {/* Back button */}
-      <Link
-        href="/schedules"
-        className="inline-flex items-center gap-2 text-sm font-semibold text-[#123b63] hover:text-[#c94242]"
-      >
-        <ArrowLeft className="size-4" />
-        Kembali ke Jadwal
-      </Link>
+      <BackButton />
 
       {/* Header */}
       <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <p className="text-xs font-medium text-slate-500">
-            Dashboard / Jadwal / <span className="font-mono">{schedule.id}</span>
+            <Link href="/dashboard" className="hover:underline">
+              Dashboard
+            </Link>{" "}
+            /{" "}
+            <Link href="/schedules" className="hover:underline">
+              Jadwal
+            </Link>{" "}
+            / <span className="font-mono">{schedule.id}</span>
           </p>
           <div className="mt-2 flex flex-wrap items-center gap-2">
             <h1 className="text-2xl font-bold tracking-tight text-[#102f50]">{subjectName}</h1>
@@ -228,49 +229,52 @@ export function ScheduleDetail({ scheduleId }: { scheduleId: string }) {
         <div className="grid gap-6 p-6 sm:grid-cols-2 lg:grid-cols-3">
           <DetailCard
             icon={<GraduationCap className="size-4 text-[#123b63]" />}
-            label="Subject"
+            label="Mata Pelajaran"
             value={subjectName}
-            subValue={`Kode: ${schedule.subject?.code ?? "-"}`}
+            subValue={schedule.subject?.code ? `Kode: ${schedule.subject.code}` : undefined}
           />
           <DetailCard
             icon={<Users className="size-4 text-[#123b63]" />}
             label="Batch"
             value={batchName}
-            subValue={`Class: ${className}`}
+            subValue={className !== "-" ? `Kelas: ${className}` : undefined}
           />
           <DetailCard
             icon={<User className="size-4 text-[#123b63]" />}
-            label="Instructor"
+            label="Instruktur"
             value={instructorName}
           />
           <DetailCard
             icon={<CalendarDays className="size-4 text-[#123b63]" />}
             label="Tanggal"
-            value={rawDate}
-            subValue={formattedDate}
+            value={formattedDate}
+            subValue={rawDate}
           />
           <DetailCard
             icon={<Clock className="size-4 text-[#123b63]" />}
             label="Waktu Pelaksanaan"
-            value={`${startTime} - ${endTime}`}
-            subValue="WIB (Waktu Terjadwal)"
+            value={`${startTime} – ${endTime} WIB`}
           />
           <DetailCard
             icon={<MapPin className="size-4 text-[#123b63]" />}
-            label="Ruangan (Room)"
-            value={schedule.room}
+            label="Ruangan"
+            value={schedule.room || "-"}
           />
-          <DetailCard
-            icon={<Shirt className="size-4 text-[#123b63]" />}
-            label="Dresscode"
-            value={schedule.dressCode}
-          />
-          <DetailCard
-            icon={<Tag className="size-4 text-[#123b63]" />}
-            label="Topic / Catatan"
-            value={schedule.topic ?? "-"}
-            highlight={Boolean(schedule.topic)}
-          />
+          {schedule.dressCode ? (
+            <DetailCard
+              icon={<Shirt className="size-4 text-[#123b63]" />}
+              label="Dress Code"
+              value={schedule.dressCode}
+            />
+          ) : null}
+          {schedule.topic ? (
+            <DetailCard
+              icon={<Tag className="size-4 text-[#123b63]" />}
+              label="Topik / Catatan"
+              value={schedule.topic}
+              highlight={true}
+            />
+          ) : null}
           <DetailCard
             icon={<CalendarDays className="size-4 text-[#123b63]" />}
             label="Status Jadwal"
@@ -291,7 +295,7 @@ function DetailCard({
 }: {
   icon: React.ReactNode;
   label: string;
-  value: string;
+  value: React.ReactNode;
   subValue?: string;
   highlight?: boolean;
 }) {
@@ -306,12 +310,13 @@ function DetailCard({
           highlight ? "text-amber-800" : "text-[#102f50]"
         }`}
       >
-        {value}
+        {value ?? "-"}
       </p>
       {subValue && <p className="mt-0.5 text-xs text-slate-400">{subValue}</p>}
     </div>
   );
 }
+
 
 function ScheduleStatusBadge({ status }: { status: string }) {
   const classes =

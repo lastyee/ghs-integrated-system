@@ -278,7 +278,7 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
         )}
       </div>
 
-      <section className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+      <section className="grid gap-4 sm:grid-cols-2">
         <StatCard
           label="Total Batch"
           value={loading ? "..." : String(batches.length)}
@@ -290,13 +290,6 @@ export function BatchesPage({ userRole, canDelete = false }: BatchesPageProps) {
           label="Batch Ditampilkan"
           value={loading ? "..." : String(total)}
           description="Hasil filter & pencarian"
-          icon={Calendar}
-          tone="blue"
-        />
-        <StatCard
-          label="Status Database"
-          value="LIVE API"
-          description="Terhubung langsung ke backend Academic Core"
           icon={Calendar}
           tone="blue"
         />

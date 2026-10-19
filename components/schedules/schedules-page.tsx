@@ -33,8 +33,8 @@ export interface ApiSchedule {
   date: string;
   startTime: string;
   endTime: string;
-  room: string;
-  dressCode: string;
+  room: string | null;
+  dressCode: string | null;
   topic: string | null;
   status: "SCHEDULED" | "COMPLETED" | "CANCELLED";
   createdAt: string;

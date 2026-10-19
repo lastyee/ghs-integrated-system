@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { CalendarDays, Loader2 } from "lucide-react";
+import { CalendarDays, ChevronRight, Loader2 } from "lucide-react";
 
 type StudentSchedule = {
   id: string;
@@ -142,42 +142,52 @@ export function StudentDashboard() {
               const isToday = scheduleTime === today;
               
               return (
-                <div key={schedule.id} className="px-5 py-4">
-                  <div className="mb-2">
-                    <span className={`inline-block rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${isToday ? "bg-[#BF120E] text-white" : "bg-blue-100 text-blue-700"}`}>
-                      {isToday ? "Kelas Hari Ini" : "Kelas Berikutnya"}
-                    </span>
+                <Link
+                  key={schedule.id}
+                  href={`/schedules/${schedule.id}`}
+                  className="group flex items-center justify-between px-5 py-4 cursor-pointer transition-colors duration-150 hover:bg-slate-50 focus:outline-none focus-visible:bg-slate-50 focus-visible:ring-2 focus-visible:ring-[#BF120E] focus-visible:ring-inset"
+                  aria-label={`Lihat detail jadwal ${schedule.subject.name}`}
+                >
+                  <div className="min-w-0 flex-1 pr-4">
+                    <div className="mb-2">
+                      <span className={`inline-block rounded-full px-2 py-1 text-[10px] font-bold uppercase tracking-wider ${isToday ? "bg-[#BF120E] text-white" : "bg-blue-100 text-blue-700"}`}>
+                        {isToday ? "Kelas Hari Ini" : "Kelas Berikutnya"}
+                      </span>
+                    </div>
+                    <p className="text-base font-semibold text-[#1B1B1B] transition-colors group-hover:text-[#BF120E]">
+                      {schedule.subject.name}
+                    </p>
+                    <p className="mt-1 text-sm text-slate-500">
+                      {schedule.class.name} {schedule.class.batch.name ? `· ${schedule.class.batch.name}` : ""} · {schedule.instructor.name}
+                      {schedule.room ? ` · Ruangan: ${schedule.room}` : ""}
+                    </p>
+                    <time className="mt-2 flex items-center gap-1.5 text-sm font-medium text-slate-700" dateTime={schedule.date}>
+                      <CalendarDays className="size-4 text-slate-400" />
+                      {new Date(schedule.date).toLocaleDateString("id-ID", {
+                        weekday: 'long',
+                        day: 'numeric',
+                        month: 'long',
+                        year: 'numeric',
+                        timeZone: "UTC"
+                      })}
+                      {" · "}
+                      {new Date(schedule.startTime).toLocaleTimeString("id-ID", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        timeZone: "UTC",
+                      })}
+                      {" – "}
+                      {new Date(schedule.endTime).toLocaleTimeString("id-ID", {
+                        hour: "2-digit",
+                        minute: "2-digit",
+                        timeZone: "UTC",
+                      })}
+                    </time>
                   </div>
-                  <p className="text-base font-semibold text-[#1B1B1B]">
-                    {schedule.subject.name}
-                  </p>
-                  <p className="mt-1 text-sm text-slate-500">
-                    {schedule.class.name} {schedule.class.batch.name ? `· ${schedule.class.batch.name}` : ""} · {schedule.instructor.name}
-                    {schedule.room ? ` · Ruangan: ${schedule.room}` : ""}
-                  </p>
-                  <time className="mt-2 flex items-center gap-1.5 text-sm font-medium text-slate-700" dateTime={schedule.date}>
-                    <CalendarDays className="size-4 text-slate-400" />
-                    {new Date(schedule.date).toLocaleDateString("id-ID", { 
-                      weekday: 'long', 
-                      day: 'numeric', 
-                      month: 'long', 
-                      year: 'numeric',
-                      timeZone: "UTC"
-                    })} 
-                    {" · "}
-                    {new Date(schedule.startTime).toLocaleTimeString("id-ID", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      timeZone: "UTC",
-                    })}
-                    {" – "}
-                    {new Date(schedule.endTime).toLocaleTimeString("id-ID", {
-                      hour: "2-digit",
-                      minute: "2-digit",
-                      timeZone: "UTC",
-                    })}
-                  </time>
-                </div>
+                  <div className="flex shrink-0 items-center pl-2">
+                    <ChevronRight className="size-5 text-slate-400 transition-transform duration-150 group-hover:translate-x-0.5 group-hover:text-slate-600" />
+                  </div>
+                </Link>
               );
             })}
           </div>
