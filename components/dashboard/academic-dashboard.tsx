@@ -94,9 +94,10 @@ export async function AcademicDashboard() {
   ];
 
   return (
-    <div className="mx-auto max-w-375 p-4 sm:p-8">
-      <div className="mb-7">
-        <p className="text-sm text-slate-500">Ringkasan data akademik dari catatan sistem.</p>
+    <div className="mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8">
+      <div className="mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Dashboard Akademik</h1>
+        <p className="mt-1 text-xs sm:text-sm text-slate-500">Ringkasan data akademik dari catatan sistem.</p>
       </div>
 
       <section aria-label="Ringkasan akademik" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -122,7 +123,7 @@ export async function AcademicDashboard() {
               {schedules.map((schedule) => (
                 <div key={schedule.id} className="grid gap-1 px-5 py-4 sm:grid-cols-[170px_minmax(0,1fr)]">
                   <p className="text-sm font-semibold text-[#1B1B1B]">
-                    {new Date(schedule.date).toLocaleDateString("id-ID")}
+                    {new Date(schedule.date).toLocaleDateString("id-ID", { timeZone: "UTC" })}
                   </p>
                   <div>
                     <p className="text-sm font-semibold text-[#1B1B1B]">{schedule.subject.name}</p>
@@ -130,9 +131,9 @@ export async function AcademicDashboard() {
                       {schedule.class.name} · {schedule.class.batch.name} · {schedule.instructor.name}
                     </p>
                     <p className="mt-1 text-xs text-slate-500">
-                      {new Date(schedule.startTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                      {new Date(schedule.startTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}
                       {" – "}
-                      {new Date(schedule.endTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                      {new Date(schedule.endTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}
                       {schedule.room ? ` · ${schedule.room}` : ""}
                     </p>
                   </div>

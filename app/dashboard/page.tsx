@@ -9,6 +9,7 @@ import { RecentActivity } from "@/components/dashboard/recent-activity";
 import { StatCard } from "@/components/dashboard/stat-card";
 import { AppShell } from "@/components/layout/app-shell";
 import { FileCheck2, GraduationCap, Users, ClipboardCheck } from "lucide-react";
+import { PageContainer, PageHeader } from "@/components/ui/page-container";
 
 const prisma = new PrismaClient();
 
@@ -73,10 +74,11 @@ export default async function DashboardHubPage() {
 
   return (
     <AppShell title="Dashboard Admin" activeLabel="Dashboard">
-      <div className="mx-auto max-w-375 p-4 sm:p-8">
-        <div className="mb-7">
-          <p className="text-sm text-slate-500">Ringkasan aktivitas dan kondisi sistem GHS</p>
-        </div>
+      <PageContainer maxWidth="wide">
+        <PageHeader
+          title="Dashboard Admin"
+          description="Ringkasan aktivitas dan kondisi sistem GHS"
+        />
         <section aria-label="Statistik ringkasan" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
           {statCards.map((card) => (
             <StatCard
@@ -92,7 +94,7 @@ export default async function DashboardHubPage() {
         <div className="mt-6">
           <RecentActivity entries={recentLogs} />
         </div>
-      </div>
+      </PageContainer>
     </AppShell>
   );
 }

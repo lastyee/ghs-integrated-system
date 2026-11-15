@@ -1,4 +1,4 @@
-﻿// scripts/test-step74b-certificates-reports.mjs
+// scripts/test-step74b-certificates-reports.mjs
 // Step 74B: Backend Certificates & Reports Implementation Test Suite
 
 import { PrismaClient } from "@prisma/client";
@@ -165,11 +165,17 @@ async function run() {
     const studentA = demoStudentUser?.student;
     if (!studentA) throw new Error("Demo student record not linked in database!");
 
-    // Find student B without linked userId
+    // Find student B without linked userId who is enrolled in baselineBatch
     studentBRecord = await prisma.student.findFirst({
       where: {
         id: { not: studentA.id },
         userId: null,
+        enrollments: {
+          some: {
+            batchId: baselineBatch.id,
+            deletedAt: null,
+          },
+        },
       },
     });
     if (!studentBRecord) throw new Error("Could not find unlinked student for Student B testing!");

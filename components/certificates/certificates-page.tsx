@@ -439,20 +439,24 @@ export function CertificatesPage({ canDelete }: { canDelete: boolean }) {
                             <ExternalLink className="size-3" />
                           </Link>
 
-                          {cert.path && (
+                          {cert.path && (!isRevoked || !isStudent) && (
                             <button
                               type="button"
                               onClick={() => handleDownload(cert)}
                               disabled={downloadingId === cert.id}
                               aria-label={`Download sertifikat ${cert.certificateNumber}`}
-                              className="inline-flex items-center gap-1 rounded-lg bg-[#102f50] px-3 py-1.5 text-xs font-semibold text-white hover:bg-[#1a4066] disabled:opacity-50"
+                              className={`inline-flex items-center gap-1 rounded-lg px-3 py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                                isRevoked
+                                  ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                                  : "bg-[#102f50] text-white hover:bg-[#1a4066]"
+                              }`}
                             >
                               {downloadingId === cert.id ? (
                                 <Loader2 className="size-3 animate-spin" />
                               ) : (
                                 <Download className="size-3" />
                               )}
-                              Unduh
+                              {isRevoked ? "Unduh Arsip (Dicabut)" : "Unduh"}
                             </button>
                           )}
                           {canDelete && (
@@ -533,19 +537,23 @@ export function CertificatesPage({ canDelete }: { canDelete: boolean }) {
                     >
                       Lihat Rincian
                     </Link>
-                    {cert.path && (
+                    {cert.path && (!isRevoked || !isStudent) && (
                       <button
                         type="button"
                         onClick={() => handleDownload(cert)}
                         disabled={downloadingId === cert.id}
-                        className="flex-1 inline-flex items-center justify-center gap-1 rounded-lg bg-[#102f50] py-1.5 text-xs font-semibold text-white hover:bg-[#1a4066] disabled:opacity-50"
+                        className={`flex-1 inline-flex items-center justify-center gap-1 rounded-lg py-1.5 text-xs font-semibold disabled:opacity-50 ${
+                          isRevoked
+                            ? "border border-red-200 bg-red-50 text-red-700 hover:bg-red-100"
+                            : "bg-[#102f50] text-white hover:bg-[#1a4066]"
+                        }`}
                       >
                         {downloadingId === cert.id ? (
                           <Loader2 className="size-3 animate-spin" />
                         ) : (
                           <Download className="size-3" />
                         )}
-                        Unduh
+                        {isRevoked ? "Unduh Arsip (Dicabut)" : "Unduh"}
                       </button>
                     )}
                     {canDelete && (

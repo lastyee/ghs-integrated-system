@@ -237,9 +237,10 @@ export async function ManagementDashboard() {
   ] as const;
 
   return (
-    <div className="mx-auto max-w-375 p-4 sm:p-8">
-      <div className="mb-7">
-        <p className="text-sm text-slate-500">Jumlah catatan aktual yang tersimpan pada sistem.</p>
+    <div className="mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8">
+      <div className="mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Dashboard Manajemen</h1>
+        <p className="mt-1 text-xs sm:text-sm text-slate-500">Ringkasan kondisi menyeluruh seluruh modul sistem.</p>
       </div>
 
       <section aria-label="Jumlah data operasional" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">

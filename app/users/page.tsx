@@ -2,6 +2,7 @@ import { AppShell } from "@/components/layout/app-shell";
 import { UserManagementPage } from "@/components/users/user-management-page";
 import { requireAuthenticatedUser, userHasPermission, UnauthorizedError } from "@/lib/authorization";
 import { redirect } from "next/navigation";
+import { PageContainer, PageHeader } from "@/components/ui/page-container";
 
 export default async function UsersRoute() {
   let user;
@@ -25,7 +26,13 @@ export default async function UsersRoute() {
       subtitle="Kelola dan pantau akun pengguna sistem serta status aktivasi mahasiswa"
       activeLabel="Pengguna"
     >
-      <UserManagementPage canDelete={canDelete} currentUserRole={user.role} />
+      <PageContainer maxWidth="wide">
+        <PageHeader
+          title="Manajemen Pengguna"
+          description="Kelola dan pantau akun pengguna sistem serta status aktivasi mahasiswa"
+        />
+        <UserManagementPage canDelete={canDelete} currentUserRole={user.role} />
+      </PageContainer>
     </AppShell>
   );
 }

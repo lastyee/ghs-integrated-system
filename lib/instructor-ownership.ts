@@ -79,3 +79,31 @@ export async function requireInstructorStudentAccess(
 
   return instructor;
 }
+
+export async function requireInstructorAssignmentAccess(
+  user: AuthenticatedUser,
+  assignmentId: string,
+): Promise<{ id: string }> {
+  const instructor = await requireLinkedInstructor(user);
+  const assignment = await prisma.assignment.findUnique({
+    where: { id: assignmentId, deletedAt: null },
+    select: {
+      instructorId: true,
+      class: {
+        select: {
+          instructorId: true,
+        },
+      },
+    },
+  });
+
+  if (
+    !assignment ||
+    (assignment.instructorId !== instructor.id &&
+      assignment.class.instructorId !== instructor.id)
+  ) {
+    throw new ForbiddenError();
+  }
+
+  return instructor;
+}

@@ -53,6 +53,9 @@ export async function GET(
       if (certificate.student.userId !== authenticatedUser.id) {
         throw new ForbiddenError("Access to this certificate download is denied");
       }
+      if (certificate.status === "REVOKED") {
+        throw new ForbiddenError("Certificate has been revoked and cannot be downloaded by student");
+      }
     }
 
     if (!certificate.path) {

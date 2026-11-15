@@ -97,6 +97,19 @@ enum CertificateStatus {
   REVOKED
 }
 
+enum AssignmentStatus {
+  DRAFT
+  PUBLISHED
+  CLOSED
+}
+
+enum SubmissionStatus {
+  SUBMITTED
+  LATE
+  GRADED
+  RESUBMITTED
+}
+
 // ============================================================================
 // RBAC & USERS
 // ============================================================================
@@ -114,8 +127,9 @@ model User {
   instructor Instructor? // Nullable, one-to-one relation
 
   // Relations for instructing/verifying
-  verifiedDocuments Document[] @relation("DocumentVerifier")
+  verifiedDocuments Document[]             @relation("DocumentVerifier")
   auditLogs         AuditLog[]
+  gradedAssignments AssignmentSubmission[] @relation("AssignmentGrader")
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -197,6 +211,7 @@ model Subject {
   programs    ProgramSubject[]
   assessments Assessment[]
   schedules   Schedule[]
+  assignments Assignment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -246,6 +261,7 @@ model Instructor {
 
   classes   Class[]
   schedules Schedule[]
+  assignments Assignment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -265,6 +281,7 @@ model Class {
 
   schedules   Schedule[]
   assessments Assessment[]
+  assignments Assignment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -293,9 +310,10 @@ model Student {
   attendances  Attendance[]
   scores       AssessmentScore[]
   documents    Document[]
-  applications Application[]
-  placements   Placement[]
-  certificates Certificate[]
+  applications          Application[]
+  placements            Placement[]
+  certificates          Certificate[]
+  assignmentSubmissions AssignmentSubmission[]
 
   createdAt DateTime  @default(now())
   updatedAt DateTime  @updatedAt
@@ -343,6 +361,7 @@ model Schedule {
   status    ScheduleStatus @default(SCHEDULED)
 
   attendances Attendance[]
+  assignments Assignment[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -441,6 +460,82 @@ model Document {
   @@index([studentId])
   @@index([deletedAt, storagePurgedAt])
   @@map("documents")
+}
+
+// ============================================================================
+// ASSIGNMENTS & SUBMISSIONS
+// ============================================================================
+
+model Assignment {
+  id                  String           @id @default(cuid())
+  title               String
+  description         String?
+  classId             String
+  class               Class            @relation(fields: [classId], references: [id])
+  subjectId           String
+  subject             Subject          @relation(fields: [subjectId], references: [id])
+  scheduleId          String?
+  schedule            Schedule?        @relation(fields: [scheduleId], references: [id], onDelete: SetNull)
+  instructorId        String
+  instructor          Instructor       @relation(fields: [instructorId], references: [id])
+
+  dueDate             DateTime
+  allowLateSubmission Boolean          @default(false)
+  maxScore            Float            @default(100)
+  status              AssignmentStatus @default(PUBLISHED)
+
+  attachmentPath      String?
+  attachmentName      String?
+  attachmentSize      Int?
+  attachmentType      String?
+
+  submissions         AssignmentSubmission[]
+
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  deletedAt           DateTime?
+
+  @@index([classId])
+  @@index([subjectId])
+  @@index([scheduleId])
+  @@index([instructorId])
+  @@index([dueDate])
+  @@index([deletedAt])
+  @@map("assignments")
+}
+
+model AssignmentSubmission {
+  id           String           @id @default(cuid())
+  assignmentId String
+  assignment   Assignment       @relation(fields: [assignmentId], references: [id])
+  studentId    String
+  student      Student          @relation(fields: [studentId], references: [id])
+
+  status       SubmissionStatus @default(SUBMITTED)
+  content      String?
+  storagePath  String
+  fileName     String
+  fileSize     Int
+  fileType     String
+  submittedAt  DateTime         @default(now())
+  attemptCount Int              @default(1)
+
+  score        Float?
+  feedback     String?
+  gradedById   String?
+  gradedBy     User?            @relation("AssignmentGrader", fields: [gradedById], references: [id], onDelete: SetNull)
+  gradedAt     DateTime?
+
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+  deletedAt    DateTime?
+
+  @@unique([assignmentId, studentId])
+  @@index([assignmentId])
+  @@index([studentId])
+  @@index([status])
+  @@index([deletedAt])
+  @@map("assignment_submissions")
 }
 
 // ============================================================================

@@ -224,6 +224,7 @@ export function CertificateDetail({ certificateId, canDelete }: CertificateDetai
   }
 
   const isRevoked = certificate.status === "REVOKED";
+  const isStudent = userRole === "STUDENT";
   const issuedDateStr = certificate.issuedAt
     ? new Date(certificate.issuedAt).toLocaleDateString("id-ID", {
         day: "numeric",
@@ -272,20 +273,24 @@ export function CertificateDetail({ certificateId, canDelete }: CertificateDetai
         </div>
 
         <div className="flex flex-wrap items-center gap-2">
-          {certificate.path && (
+          {certificate.path && (!isRevoked || !isStudent) && (
             <button
               type="button"
               data-testid="download-certificate-button"
               onClick={handleDownload}
               disabled={downloading}
-              className="inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-[#1a4066] disabled:opacity-50"
+              className={`inline-flex items-center gap-2 rounded-lg px-4 py-2 text-sm font-semibold shadow-sm transition disabled:opacity-50 ${
+                isRevoked
+                  ? "border border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+                  : "bg-[#102f50] text-white hover:bg-[#1a4066]"
+              }`}
             >
               {downloading ? (
                 <Loader2 className="size-4 animate-spin" />
               ) : (
                 <Download className="size-4" />
               )}
-              Lihat / Download Sertifikat
+              {isRevoked ? "Unduh Berkas Arsip (Sertifikat Dicabut)" : "Lihat / Download Sertifikat"}
             </button>
           )}
 
@@ -320,6 +325,7 @@ export function CertificateDetail({ certificateId, canDelete }: CertificateDetai
             <h2 className="text-sm font-bold">Sertifikat Telah Dicabut</h2>
             <p className="mt-0.5 text-xs text-red-700">
               Sertifikat ini sudah tidak berlaku secara resmi dan telah dicabut oleh pihak manajemen / admin GHS.
+              {isStudent && " Unduhan berkas tidak tersedia untuk siswa karena sertifikat telah dibatalkan."}
             </p>
           </div>
         </div>
@@ -451,15 +457,26 @@ export function CertificateDetail({ certificateId, canDelete }: CertificateDetai
             </div>
             {certificate.path && (
               <div className="pt-2">
-                <button
-                  type="button"
-                  onClick={handleDownload}
-                  disabled={downloading}
-                  className="inline-flex items-center gap-2 rounded-lg bg-[#102f50] px-3.5 py-1.5 text-xs font-semibold text-white hover:bg-[#1a4066] disabled:opacity-50"
-                >
-                  {downloading && <Loader2 className="size-3.5 animate-spin" />}
-                  Buka Tautan Unduh
-                </button>
+                {isRevoked && isStudent ? (
+                  <p className="text-xs font-medium text-red-600">
+                    Sertifikat telah dicabut. Unduhan berkas tidak tersedia untuk siswa.
+                  </p>
+                ) : (
+                  <button
+                    type="button"
+                    data-testid="secondary-download-button"
+                    onClick={handleDownload}
+                    disabled={downloading}
+                    className={`inline-flex items-center gap-2 rounded-lg px-3.5 py-1.5 text-xs font-semibold shadow-sm transition disabled:opacity-50 ${
+                      isRevoked
+                        ? "border border-red-300 bg-red-50 text-red-700 hover:bg-red-100"
+                        : "bg-[#102f50] text-white hover:bg-[#1a4066]"
+                    }`}
+                  >
+                    {downloading && <Loader2 className="size-3.5 animate-spin" />}
+                    {isRevoked ? "Buka Arsip Unduhan (Dicabut)" : "Buka Tautan Unduh"}
+                  </button>
+                )}
               </div>
             )}
           </div>

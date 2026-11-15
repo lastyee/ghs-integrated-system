@@ -30,7 +30,7 @@ export function AppShellClient({
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div className="flex min-h-screen w-full min-w-0 bg-[#f5f7fa]">
+    <div className="flex min-h-screen w-full min-w-0 bg-[#F4F5F7]">
       <AppSidebar
         open={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -42,6 +42,7 @@ export function AppShellClient({
         <AppHeader
           onMenuClick={() => setSidebarOpen(true)}
           title={title}
+          activeLabel={activeLabel}
           role={role}
           initials={initials}
           userName={userName}

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import Image from "next/image";
-import { Award, BarChart3, Users, X } from "lucide-react";
+import { Award, BarChart3, ClipboardList, History, Users, X } from "lucide-react";
 import { navigationGroups, studentNavigationGroups } from "@/lib/mock-data";
 
 type AppSidebarProps = {
@@ -40,6 +40,9 @@ const itemRoutes: Record<string, string> = {
   "Sertifikat Saya": "/certificates",
   Laporan: "/reports",
   Pengguna: "/users",
+  Tugas: "/assignments",
+  "Tugas Saya": "/assignments",
+  "Audit Log": "/audit",
 };
 
 export function AppSidebar({
@@ -53,6 +56,8 @@ export function AppSidebar({
   const isSuperAdmin = normalizedRole.includes("super_admin") || normalizedRole.includes("super admin");
   const isAdmin = normalizedRole.includes("admin");
   const isAdminOrSuperAdmin = isSuperAdmin || isAdmin;
+  const isManagement = normalizedRole.includes("management");
+  const canViewAudit = isAdminOrSuperAdmin || isManagement;
   const isInstructor = normalizedRole.includes("instructor");
   const isAcademic = normalizedRole.includes("academic");
   const isPlacement = normalizedRole.includes("placement");
@@ -67,6 +72,10 @@ export function AppSidebar({
 
   // Dynamic injection so lib/mock-data.ts remains free of dead mock navigation items
   if (isStudent) {
+    const trainingGroup = rawGroups.find((g) => g.label === "Training");
+    if (trainingGroup && !trainingGroup.items.some((i) => i.label === "Tugas")) {
+      trainingGroup.items.push({ label: "Tugas", icon: ClipboardList });
+    }
     const docGroup = rawGroups.find((g) => g.label === "Dokumen");
     if (docGroup && !docGroup.items.some((i) => i.label === "Sertifikat")) {
       docGroup.items.push({ label: "Sertifikat", icon: Award });
@@ -79,8 +88,12 @@ export function AppSidebar({
       });
     }
 
+    const academicGroup = rawGroups.find((group) => group.label === "Akademik");
+    if (academicGroup && !academicGroup.items.some((item) => item.label === "Tugas")) {
+      academicGroup.items.push({ label: "Tugas", icon: ClipboardList });
+    }
+
     if (isAdminOrSuperAdmin || isAcademic) {
-      const academicGroup = rawGroups.find((group) => group.label === "Akademik");
       if (academicGroup && !academicGroup.items.some((item) => item.label === "Instruktur")) {
         academicGroup.items.push({ label: "Instruktur", icon: Users });
       }
@@ -88,11 +101,31 @@ export function AppSidebar({
 
     // Add User Management for Admin and Super Admin
     if (isAdminOrSuperAdmin) {
-      if (!rawGroups.some((g) => g.label === "Sistem & Pengguna")) {
-        rawGroups.push({
+      let sysGroup = rawGroups.find((g) => g.label === "Sistem & Pengguna");
+      if (!sysGroup) {
+        sysGroup = {
           label: "Sistem & Pengguna",
-          items: [{ label: "Pengguna", icon: Users }],
-        });
+          items: [],
+        };
+        rawGroups.push(sysGroup);
+      }
+      if (!sysGroup.items.some((item) => item.label === "Pengguna")) {
+        sysGroup.items.push({ label: "Pengguna", icon: Users });
+      }
+    }
+
+    // Add Audit Log for Super Admin, Admin, and Management
+    if (canViewAudit) {
+      let sysGroup = rawGroups.find((g) => g.label === "Sistem & Pengguna");
+      if (!sysGroup) {
+        sysGroup = {
+          label: "Sistem & Pengguna",
+          items: [],
+        };
+        rawGroups.push(sysGroup);
+      }
+      if (!sysGroup.items.some((item) => item.label === "Audit Log")) {
+        sysGroup.items.push({ label: "Audit Log", icon: History });
       }
     }
   }
@@ -113,11 +146,13 @@ export function AppSidebar({
           return false;
         }
 
-        // Student cannot see aggregate reports or user management
-        if (isStudent && item.label === "Laporan") {
+        // Student cannot see aggregate reports, user management, or audit logs
+        if (isStudent && (item.label === "Laporan" || item.label === "Pengguna" || item.label === "Audit Log")) {
           return false;
         }
-        if (isStudent && item.label === "Pengguna") {
+
+        // Restrict Audit Log to roles with audit:read permission
+        if (!canViewAudit && item.label === "Audit Log") {
           return false;
         }
 
@@ -139,6 +174,7 @@ export function AppSidebar({
             "Sertifikat Saya",
             "Laporan",
             "Pengguna",
+            "Audit Log",
           ];
           if (instructorHidden.includes(item.label)) return false;
         } else if (isAcademic) {
@@ -153,6 +189,7 @@ export function AppSidebar({
             "Sertifikat",
             "Sertifikat Saya",
             "Pengguna",
+            "Audit Log",
           ];
           if (academicHidden.includes(item.label)) return false;
         } else if (isPlacement) {
@@ -165,9 +202,11 @@ export function AppSidebar({
             "Jadwal",
             "Kehadiran",
             "Penilaian",
+            "Tugas",
             "Sertifikat",
             "Sertifikat Saya",
             "Pengguna",
+            "Audit Log",
           ];
           if (placementHidden.includes(item.label)) return false;
         }
@@ -192,10 +231,10 @@ export function AppSidebar({
           open ? "translate-x-0" : "-translate-x-full"
         }`}
       >
-        {/* Compact Logo Brand Header */}
-        <div className="flex h-18 items-center justify-between border-b border-[#2D2D2D] px-5">
+        {/* Compact Logo Brand Header (h-16 exactly aligned with AppHeader) */}
+        <div className="flex h-16 items-center justify-between border-b border-[#2D2D2D] px-5">
           <Link href="/dashboard" className="flex items-center gap-3">
-            <div className="relative size-10 shrink-0">
+            <div className="relative size-8 shrink-0">
               <Image
                 src="/images/ghs-logo.png"
                 alt="Global Hospitality Logo"
@@ -217,7 +256,7 @@ export function AppSidebar({
           <button
             type="button"
             aria-label="Tutup menu"
-            className="rounded-md p-1.5 text-slate-400 hover:bg-[#2D2D2D] hover:text-white lg:hidden"
+            className="rounded-lg p-1.5 text-slate-400 hover:bg-[#2D2D2D] hover:text-white lg:hidden"
             onClick={onClose}
           >
             <X className="size-5" />
@@ -239,9 +278,9 @@ export function AppSidebar({
                   const href = itemRoutes[item.label];
                   const isActive = item.label === activeLabel;
 
-                  const itemClass = `flex w-full items-center gap-2.5 rounded-md px-3 py-2 text-left text-xs transition-colors ${
+                  const itemClass = `flex w-full items-center gap-2.5 rounded-lg px-3 py-2 text-left text-xs transition-colors ${
                     isActive
-                      ? "bg-[#BF120E] font-medium text-white shadow-xs"
+                      ? "bg-[#BF120E] font-semibold text-white shadow-xs"
                       : "text-slate-300 hover:bg-[#2A2A2A] hover:text-white"
                   }`;
 
@@ -272,9 +311,9 @@ export function AppSidebar({
         </nav>
 
         {/* Footer Brand Info */}
-        <div className="border-t border-[#333333] bg-[#141414] px-5 py-3.5 text-[11px] text-slate-400 flex items-center justify-between">
+        <div className="flex items-center justify-between border-t border-[#333333] bg-[#141414] px-5 py-3 text-[11px] text-slate-400">
           <span className="font-semibold text-slate-300">GHS Portal</span>
-          <span className="rounded bg-[#333333] px-1.5 py-0.5 text-[10px] font-mono text-[#FFD618]">
+          <span className="rounded bg-[#2A2A2A] px-1.5 py-0.5 font-mono text-[10px] text-[#FFD618]">
             v1.0
           </span>
         </div>

@@ -779,9 +779,13 @@ async function main() {
     record("5.7 Admin revokes certificate -> 200 OK", 200, resC7.status, "SCENARIO_5_CERTIFICATE");
     record("5.7b Status updated to REVOKED", "REVOKED", resC7.data?.data?.status, "SCENARIO_5_CERTIFICATE");
 
-    // 5.8 Revoked certificate download returns status REVOKED
-    const resC8 = await api("GET", `/api/certificates/${testCertId}/download`, studentCookies);
-    record("5.8 Revoked certificate download returns status REVOKED", "REVOKED", resC8.data?.data?.status, "SCENARIO_5_CERTIFICATE");
+    // 5.8 Revoked certificate download blocked for student (403), allowed for staff (200 REVOKED)
+    const resC8Student = await api("GET", `/api/certificates/${testCertId}/download`, studentCookies);
+    record("5.8a Revoked certificate download blocked for student -> 403 Forbidden", 403, resC8Student.status, "SCENARIO_5_CERTIFICATE");
+
+    const resC8Staff = await api("GET", `/api/certificates/${testCertId}/download`, adminCookies);
+    record("5.8b Revoked certificate download allowed for staff -> 200 OK", 200, resC8Staff.status, "SCENARIO_5_CERTIFICATE");
+    record("5.8c Staff download returns status REVOKED", "REVOKED", resC8Staff.data?.data?.status, "SCENARIO_5_CERTIFICATE");
 
     // 5.9 Duplicate certificateNumber rejected
     const resC9 = await api("POST", "/api/certificates", adminCookies, {

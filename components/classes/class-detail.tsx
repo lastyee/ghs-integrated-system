@@ -53,6 +53,14 @@ interface EnrollmentItem {
   };
 }
 
+function formatUtcTime(timeStr: string): string {
+  if (!timeStr) return "-";
+  if (timeStr.includes("T")) {
+    return timeStr.split("T")[1].substring(0, 5);
+  }
+  return timeStr.substring(0, 5);
+}
+
 export function ClassDetail({ classId }: { classId: string }) {
   const [classRecord, setClassRecord] = useState<ClassDetailData | null>(null);
   const [enrollments, setEnrollments] = useState<EnrollmentItem[]>([]);
@@ -232,10 +240,10 @@ export function ClassDetail({ classId }: { classId: string }) {
                 {classRecord.schedules.map((s) => (
                   <tr key={s.id} className="hover:bg-slate-50/60 transition">
                     <td className="px-5 py-4 font-semibold text-[#102f50]">
-                      {new Date(s.date).toLocaleDateString("id-ID", { dateStyle: "medium" })}
+                      {new Date(s.date).toLocaleDateString("id-ID", { dateStyle: "medium", timeZone: "UTC" })}
                     </td>
                     <td className="px-5 py-4 text-slate-600">
-                      {s.startTime} - {s.endTime}
+                      {formatUtcTime(s.startTime)} - {formatUtcTime(s.endTime)}
                     </td>
                     <td className="px-5 py-4 font-semibold text-[#123b63]">
                       {s.subject ? `[${s.subject.code}] ${s.subject.name}` : "-"}

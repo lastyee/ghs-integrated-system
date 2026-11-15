@@ -7,7 +7,7 @@ import {
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
 import { requireLinkedInstructor } from "@/lib/instructor-ownership";
-import { scheduleCreateSchema } from "@/schemas/schedule";
+import { scheduleCreateSchema, normalizeScheduleDateTime } from "@/schemas/schedule";
 
 const prisma = new PrismaClient();
 
@@ -33,6 +33,15 @@ const scheduleSelect = {
         select: {
           id: true,
           name: true,
+          startDate: true,
+          endDate: true,
+          program: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
         },
       },
     },
@@ -42,6 +51,7 @@ const scheduleSelect = {
       id: true,
       name: true,
       code: true,
+      description: true,
     },
   },
   instructor: {
@@ -74,41 +84,35 @@ export async function GET(request: Request) {
       await requirePermission("schedule:read");
     }
 
+    const classWhere: Prisma.ClassWhereInput = {
+      deletedAt: null,
+      batch: {
+        deletedAt: null,
+        program: { deletedAt: null },
+        ...(batchFilter !== "ALL" ? { name: batchFilter } : {}),
+        ...(authenticatedUser.role === "STUDENT"
+          ? {
+              enrollments: {
+                some: {
+                  student: {
+                    userId: authenticatedUser.id,
+                    deletedAt: null,
+                  },
+                  status: "ACTIVE",
+                  deletedAt: null,
+                },
+              },
+            }
+          : {}),
+      },
+      instructor: { deletedAt: null },
+    };
+
     const baseWhere: Prisma.ScheduleWhereInput = {
       deletedAt: null,
-      class: {
-        deletedAt: null,
-        batch: { deletedAt: null, program: { deletedAt: null } },
-        instructor: { deletedAt: null },
-      },
+      class: classWhere,
       subject: { deletedAt: null },
       instructor: { deletedAt: null },
-      ...(authenticatedUser.role === "STUDENT"
-        ? {
-            class: {
-              is: {
-                deletedAt: null,
-                batch: {
-                  is: {
-                    deletedAt: null,
-                    program: { deletedAt: null },
-                    enrollments: {
-                      some: {
-                        student: {
-                          userId: authenticatedUser.id,
-                          deletedAt: null,
-                        },
-                        status: "ACTIVE",
-                        deletedAt: null,
-                      },
-                    },
-                  },
-                },
-                instructor: { deletedAt: null },
-              },
-            },
-          }
-        : {}),
       ...(authenticatedUser.role === "INSTRUCTOR"
         ? { instructorId: (await requireLinkedInstructor(authenticatedUser)).id }
         : {}),
@@ -126,16 +130,6 @@ export async function GET(request: Request) {
           lt: new Date(d.getTime() + 24 * 60 * 60 * 1000),
         };
       }
-    }
-
-    if (batchFilter !== "ALL") {
-      baseWhere.class = {
-        ...(baseWhere.class as Prisma.ClassWhereInput),
-        batch: {
-          ...((baseWhere.class as Prisma.ClassWhereInput)?.batch as Prisma.BatchWhereInput),
-          name: batchFilter,
-        },
-      };
     }
 
     if (subjectFilter !== "ALL") {
@@ -170,6 +164,44 @@ export async function GET(request: Request) {
       ...searchWhere,
     };
 
+    const studentRecord =
+      authenticatedUser.role === "STUDENT"
+        ? await prisma.student.findFirst({
+            where: { userId: authenticatedUser.id, deletedAt: null },
+            select: { id: true },
+          })
+        : null;
+
+    const selectQuery = {
+      ...scheduleSelect,
+      ...(studentRecord
+        ? {
+            attendances: {
+              where: {
+                studentId: studentRecord.id,
+                deletedAt: null,
+              },
+              select: {
+                id: true,
+                status: true,
+                absenceType: true,
+                lateMinutes: true,
+                notes: true,
+              },
+            },
+          }
+        : {
+            attendances: {
+              where: { deletedAt: null },
+              select: {
+                id: true,
+                status: true,
+                absenceType: true,
+              },
+            },
+          }),
+    };
+
     const [
       schedules,
       total,
@@ -186,15 +218,15 @@ export async function GET(request: Request) {
         where,
         skip,
         take: limit,
-        select: scheduleSelect,
-        orderBy: [{ date: "asc" }, { startTime: "asc" }, { id: "asc" }],
+        select: selectQuery,
+        orderBy: [{ createdAt: "desc" }, { id: "desc" }],
       }),
       prisma.schedule.count({ where }),
       prisma.schedule.findMany({
         where: baseWhere,
         select: { date: true },
         distinct: ["date"],
-        orderBy: { date: "asc" },
+        orderBy: { date: "desc" },
       }),
       prisma.schedule.count({ where: baseWhere }),
       prisma.schedule.count({ where: { ...baseWhere, class: { batch: { name: "GHI-07" } } } }),
@@ -212,17 +244,48 @@ export async function GET(request: Request) {
       }),
       prisma.schedule.findMany({
         where: baseWhere,
-        select: { class: { select: { batch: { select: { name: true } } } } },
+        select: {
+          class: {
+            select: {
+              batch: {
+                select: {
+                  id: true,
+                  name: true,
+                  startDate: true,
+                  endDate: true,
+                  program: { select: { name: true } },
+                },
+              },
+            },
+          },
+        },
         distinct: ["classId"],
       }),
     ]);
 
     const totalPages = Math.ceil(total / limit);
-    const distinctDates = distinctDatesObj.map(d => d.date.toISOString().substring(0, 10));
+    const distinctDates = distinctDatesObj.map((d) => d.date.toISOString().substring(0, 10));
 
-    const distinctBatchNames = [...new Set(distinctClasses.map(c => c.class?.batch?.name).filter(Boolean) as string[])].sort();
-    const distinctSubjectNames = [...new Set(distinctSubjects.map(s => s.subject?.name).filter(Boolean) as string[])].sort();
-    const distinctInstructorNames = [...new Set(distinctInstructors.map(i => i.instructor?.name).filter(Boolean) as string[])].sort();
+    const distinctBatchMap = new Map<
+      string,
+      { id: string; name: string; programName?: string; startDate?: string; endDate?: string | null }
+    >();
+    for (const c of distinctClasses) {
+      const b = c.class?.batch;
+      if (b && !distinctBatchMap.has(b.name)) {
+        distinctBatchMap.set(b.name, {
+          id: b.id,
+          name: b.name,
+          programName: b.program?.name,
+          startDate: b.startDate.toISOString(),
+          endDate: b.endDate?.toISOString() ?? null,
+        });
+      }
+    }
+    const distinctBatchNames = Array.from(distinctBatchMap.keys()).sort();
+    const distinctBatches = Array.from(distinctBatchMap.values());
+    const distinctSubjectNames = [...new Set(distinctSubjects.map((s) => s.subject?.name).filter(Boolean) as string[])].sort();
+    const distinctInstructorNames = [...new Set(distinctInstructors.map((i) => i.instructor?.name).filter(Boolean) as string[])].sort();
 
     return Response.json({
       data: schedules,
@@ -241,9 +304,10 @@ export async function GET(request: Request) {
       filterOptions: {
         dates: distinctDates,
         batches: distinctBatchNames,
+        batchDetails: distinctBatches,
         subjects: distinctSubjectNames,
         instructors: distinctInstructorNames,
-      }
+      },
     });
   } catch (error) {
     if (error instanceof AuthorizationError) {
@@ -274,7 +338,11 @@ export async function POST(request: Request) {
       return Response.json({ error: "Invalid request body" }, { status: 400 });
     }
 
-    if (new Date(parsed.data.endTime) < new Date(parsed.data.startTime)) {
+    const startTimeDate = normalizeScheduleDateTime(parsed.data.startTime);
+    const endTimeDate = normalizeScheduleDateTime(parsed.data.endTime);
+    const dateDate = normalizeScheduleDateTime(parsed.data.date);
+
+    if (endTimeDate < startTimeDate) {
       return Response.json(
         { error: "endTime must not be earlier than startTime" },
         { status: 400 },
@@ -319,9 +387,9 @@ export async function POST(request: Request) {
           classId: parsed.data.classId,
           subjectId: parsed.data.subjectId,
           instructorId: parsed.data.instructorId,
-          date: new Date(parsed.data.date),
-          startTime: new Date(parsed.data.startTime),
-          endTime: new Date(parsed.data.endTime),
+          date: dateDate,
+          startTime: startTimeDate,
+          endTime: endTimeDate,
           room: parsed.data.room ?? null,
           dressCode: parsed.data.dressCode ?? null,
           topic: parsed.data.topic ?? null,

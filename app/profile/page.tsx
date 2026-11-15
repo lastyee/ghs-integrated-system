@@ -4,6 +4,7 @@ import { StaffProfilePage } from "@/components/profile/staff-profile-page";
 import { requireAuthenticatedUser, UnauthorizedError } from "@/lib/authorization";
 import { redirect } from "next/navigation";
 import { PrismaClient } from "@prisma/client";
+import { PageContainer } from "@/components/ui/page-container";
 
 const prisma = new PrismaClient();
 
@@ -27,7 +28,9 @@ export default async function ProfileRoute() {
         subtitle="Informasi identitas resmi akademik dan akun mahasiswa"
         activeLabel="Profil Saya"
       >
-        <StudentProfilePage />
+        <PageContainer maxWidth="wide">
+          <StudentProfilePage />
+        </PageContainer>
       </AppShell>
     );
   }
@@ -54,16 +57,18 @@ export default async function ProfileRoute() {
       subtitle="Informasi identitas resmi dan hak akses akun sistem"
       activeLabel="Profil Saya"
     >
-      <StaffProfilePage
-        user={{
-          id: user.id,
-          name: account?.name ?? user.name ?? null,
-          email: account?.email ?? user.email ?? "",
-          role: user.role,
-          createdAt: account?.createdAt,
-          roleDescription: account?.role?.description,
-        }}
-      />
+      <PageContainer maxWidth="narrow">
+        <StaffProfilePage
+          user={{
+            id: user.id,
+            name: account?.name ?? user.name ?? null,
+            email: account?.email ?? user.email ?? "",
+            role: user.role,
+            createdAt: account?.createdAt,
+            roleDescription: account?.role?.description,
+          }}
+        />
+      </PageContainer>
     </AppShell>
   );
 }

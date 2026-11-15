@@ -168,6 +168,9 @@ export const DOCUMENTS_BUCKET =
 export const CERTIFICATES_BUCKET =
   process.env.SUPABASE_CERTIFICATES_BUCKET || "certificates";
 
+export const ASSIGNMENTS_BUCKET =
+  process.env.SUPABASE_ASSIGNMENTS_BUCKET || "assignments";
+
 let activeStorageProvider: StorageProvider | null = null;
 
 export function getStorageProvider(): StorageProvider {
@@ -178,6 +181,12 @@ export function getStorageProvider(): StorageProvider {
   const isProduction = process.env.NODE_ENV === "production";
   const explicitProvider = process.env.STORAGE_PROVIDER;
 
+  if (isProduction && explicitProvider === "mock") {
+    throw new Error(
+      "Storage configuration error: Production environment cannot use MockStorageProvider. Set STORAGE_PROVIDER=supabase and configure valid credentials."
+    );
+  }
+
   // In production, Supabase is mandatory. Fail fast if credentials are not configured.
   if (isProduction || explicitProvider === "supabase") {
     const supabaseUrl = process.env.SUPABASE_URL;
@@ -185,8 +194,18 @@ export function getStorageProvider(): StorageProvider {
 
     if (!supabaseUrl || !serviceRoleKey) {
       throw new Error(
-        "Storage configuration error: Production storage requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
+        "Storage configuration error: Supabase storage requires SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY."
       );
+    }
+
+    try {
+      const parsed = new URL(supabaseUrl);
+      if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+        throw new Error("Invalid SUPABASE_URL protocol. Must be http or https.");
+      }
+    } catch (urlErr: unknown) {
+      const msg = urlErr instanceof Error ? urlErr.message : "Invalid URL format";
+      throw new Error(`Storage configuration error: SUPABASE_URL is invalid (${msg}).`);
     }
 
     activeStorageProvider = new SupabaseStorageProvider(
@@ -225,4 +244,21 @@ export function generateStoragePath(
   const safeExt = extension.replace(/^\./, "").toLowerCase();
   // Safe, server-controlled path isolated per student
   return `students/${studentId}/${documentId}.${safeExt}`;
+}
+
+export function generateAssignmentInstructionPath(
+  assignmentId: string,
+  extension: string
+): string {
+  const safeExt = extension.replace(/^\./, "").toLowerCase();
+  return `assignments/instructions/${assignmentId}/attachment.${safeExt}`;
+}
+
+export function generateAssignmentSubmissionPath(
+  assignmentId: string,
+  studentId: string,
+  extension: string
+): string {
+  const safeExt = extension.replace(/^\./, "").toLowerCase();
+  return `assignments/submissions/${assignmentId}/${studentId}/submission.${safeExt}`;
 }

@@ -12,25 +12,25 @@ const certificateDateSchema = z.preprocess(
 
 export const certificateCreateSchema = z
   .object({
-    studentId: z.string().min(1, "studentId is required"),
-    programId: z.string().min(1, "programId is required"),
-    batchId: z.string().min(1, "batchId is required"),
-    certificateNumber: z.string().min(1, "certificateNumber is required"),
+    studentId: z.string().trim().min(1, "studentId is required"),
+    programId: z.string().trim().min(1, "programId is required"),
+    batchId: z.string().trim().min(1, "batchId is required"),
+    certificateNumber: z.string().trim().min(1, "certificateNumber is required"),
     issuedAt: certificateDateSchema,
-    path: z.string().nullable().optional(),
+    path: z.string().trim().nullable().optional(),
   })
   .strict();
 
 export const certificateRevokeSchema = z
   .object({
-    reason: z.string().nullable().optional(),
+    reason: z.string().trim().nullable().optional(),
   })
   .strict();
 
 export const certificateQuerySchema = z
   .object({
-    studentId: z.string().optional(),
-    batchId: z.string().optional(),
+    studentId: z.string().trim().optional(),
+    batchId: z.string().trim().optional(),
     status: z.enum(["ACTIVE", "REVOKED"]).optional(),
   })
   .strict();

@@ -1,4 +1,4 @@
-﻿// scripts/test-step74c-certificates-reports-frontend.mjs
+// scripts/test-step74c-certificates-reports-frontend.mjs
 // Step 74C: Certificates & Reports Frontend Integration Test Suite
 
 import { PrismaClient } from "@prisma/client";
@@ -171,6 +171,12 @@ async function run() {
       where: {
         id: { not: studentA.id },
         userId: null,
+        enrollments: {
+          some: {
+            batchId: baselineBatch.id,
+            deletedAt: null,
+          },
+        },
       },
     });
     if (!studentBRecord) throw new Error("Second student record not found!");

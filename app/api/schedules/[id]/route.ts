@@ -8,7 +8,7 @@ import {
 } from "@/lib/authorization";
 import { createAuditLog } from "@/lib/audit-log";
 import { requireInstructorScheduleAccess } from "@/lib/instructor-ownership";
-import { scheduleUpdateSchema } from "@/schemas/schedule";
+import { scheduleUpdateSchema, normalizeScheduleDateTime } from "@/schemas/schedule";
 
 const prisma = new PrismaClient();
 
@@ -34,6 +34,15 @@ const scheduleSelect = {
         select: {
           id: true,
           name: true,
+          startDate: true,
+          endDate: true,
+          program: {
+            select: {
+              id: true,
+              name: true,
+              code: true,
+            },
+          },
         },
       },
     },
@@ -43,6 +52,7 @@ const scheduleSelect = {
       id: true,
       name: true,
       code: true,
+      description: true,
     },
   },
   instructor: {
@@ -63,6 +73,44 @@ export async function GET(
       await requirePermission("schedule:read");
     }
     const { id } = await params;
+
+    const studentRecord =
+      authenticatedUser.role === "STUDENT"
+        ? await prisma.student.findFirst({
+            where: { userId: authenticatedUser.id, deletedAt: null },
+            select: { id: true },
+          })
+        : null;
+
+    const selectQuery = {
+      ...scheduleSelect,
+      ...(studentRecord
+        ? {
+            attendances: {
+              where: {
+                studentId: studentRecord.id,
+                deletedAt: null,
+              },
+              select: {
+                id: true,
+                status: true,
+                absenceType: true,
+                lateMinutes: true,
+                notes: true,
+              },
+            },
+          }
+        : {
+            attendances: {
+              where: { deletedAt: null },
+              select: {
+                id: true,
+                status: true,
+                absenceType: true,
+              },
+            },
+          }),
+    };
 
     const schedule = await prisma.schedule.findFirst({
       where: {
@@ -102,7 +150,7 @@ export async function GET(
             }
           : {}),
       },
-      select: scheduleSelect,
+      select: selectQuery,
     });
 
     if (!schedule) {
@@ -113,7 +161,17 @@ export async function GET(
       await requireInstructorScheduleAccess(authenticatedUser, id);
     }
 
-    return Response.json({ data: schedule });
+    const courseSchedules = await prisma.schedule.findMany({
+      where: {
+        classId: schedule.classId,
+        subjectId: schedule.subjectId,
+        deletedAt: null,
+      },
+      select: selectQuery,
+      orderBy: [{ date: "desc" }, { startTime: "asc" }, { id: "asc" }],
+    });
+
+    return Response.json({ data: schedule, courseSchedules });
   } catch (error) {
     if (error instanceof AuthorizationError) {
       return authorizationErrorResponse(error);
@@ -203,8 +261,12 @@ export async function PATCH(
       }
     }
 
-    const effectiveStartTime = parsed.data.startTime ? new Date(parsed.data.startTime) : existingSchedule.startTime;
-    const effectiveEndTime = parsed.data.endTime ? new Date(parsed.data.endTime) : existingSchedule.endTime;
+    const effectiveStartTime = parsed.data.startTime
+      ? normalizeScheduleDateTime(parsed.data.startTime)
+      : existingSchedule.startTime;
+    const effectiveEndTime = parsed.data.endTime
+      ? normalizeScheduleDateTime(parsed.data.endTime)
+      : existingSchedule.endTime;
 
     if (effectiveEndTime < effectiveStartTime) {
       return Response.json(
@@ -224,13 +286,13 @@ export async function PATCH(
       data.instructor = { connect: { id: parsed.data.instructorId } };
     }
     if (parsed.data.date !== undefined) {
-      data.date = new Date(parsed.data.date);
+      data.date = normalizeScheduleDateTime(parsed.data.date);
     }
     if (parsed.data.startTime !== undefined) {
-      data.startTime = new Date(parsed.data.startTime);
+      data.startTime = effectiveStartTime;
     }
     if (parsed.data.endTime !== undefined) {
-      data.endTime = new Date(parsed.data.endTime);
+      data.endTime = effectiveEndTime;
     }
     if (parsed.data.room !== undefined) {
       data.room = parsed.data.room;

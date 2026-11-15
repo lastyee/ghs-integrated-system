@@ -77,7 +77,7 @@ export function CertificateForm({ open, onClose, onSuccess }: CertificateFormPro
     e.preventDefault();
     setError(null);
 
-    if (!studentId || !programId || !batchId || !certificateNumber || !issuedAt) {
+    if (!studentId || !programId || !batchId || !certificateNumber.trim() || !issuedAt) {
       setError("Semua field bertanda * wajib diisi.");
       return;
     }

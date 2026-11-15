@@ -1,4 +1,4 @@
-﻿// scripts/test-step74d-certificates-reports-e2e.mjs
+// scripts/test-step74d-certificates-reports-e2e.mjs
 // Step 74D: Certificates & Reports Final E2E Audit & Hardening Test Suite
 
 import { PrismaClient } from "@prisma/client";
@@ -162,20 +162,26 @@ async function main() {
     const studentA = demoStudentUser?.student;
     if (!studentA) throw new Error("Demo student record not found!");
 
-    studentBRecord = await prisma.student.findFirst({
-      where: {
-        id: { not: studentA.id },
-        userId: null,
-      },
-    });
-    if (!studentBRecord) throw new Error("Second student record not found!");
-
     // Fetch baseline Program and Batch
     const baselineProgram = await prisma.program.findFirst({ orderBy: { id: "asc" } });
     const baselineBatch = await prisma.batch.findFirst({ orderBy: { id: "asc" } });
     if (!baselineProgram || !baselineBatch) {
       throw new Error("Missing baseline program or batch");
     }
+
+    studentBRecord = await prisma.student.findFirst({
+      where: {
+        id: { not: studentA.id },
+        userId: null,
+        enrollments: {
+          some: {
+            batchId: baselineBatch.id,
+            deletedAt: null,
+          },
+        },
+      },
+    });
+    if (!studentBRecord) throw new Error("Second student record not found!");
 
     // Role mapping
     const roles = await prisma.role.findMany();

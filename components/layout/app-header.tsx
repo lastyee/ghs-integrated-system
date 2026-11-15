@@ -13,6 +13,7 @@ type AppHeaderProps = {
   userName?: string;
   email?: string | null;
   subtitle?: string;
+  activeLabel?: string;
 };
 
 export function AppHeader({
@@ -22,7 +23,7 @@ export function AppHeader({
   initials = "GH",
   userName = role,
   email,
-  subtitle,
+  activeLabel,
 }: AppHeaderProps) {
   const [showConfirm, setShowConfirm] = useState(false);
   const [isLoggingOut, setIsLoggingOut] = useState(false);
@@ -63,57 +64,65 @@ export function AppHeader({
     }
   };
 
+  const currentLocation = activeLabel || title;
+
   return (
     <>
-      <header className="flex flex-col gap-2 border-b border-[#EEEEEE] bg-white px-3 py-3 sm:min-h-16 sm:flex-row sm:items-center sm:justify-between sm:px-6 sm:py-0">
-        <div className="flex min-w-0 flex-1 items-start gap-2.5 sm:items-center sm:gap-3">
+      <header className="sticky top-0 z-30 flex h-16 w-full items-center justify-between border-b border-[#EEEEEE] bg-white/95 px-4 backdrop-blur-xs sm:px-6">
+        {/* Sisi Kiri: Toggle Sidebar & Breadcrumb Lokasi Ringkas */}
+        <div className="flex min-w-0 items-center gap-2.5 sm:gap-3">
           <button
             type="button"
             aria-label="Buka navigasi"
-            className="mt-0.5 shrink-0 rounded-md p-1.5 text-slate-600 hover:bg-[#F3F3F3] sm:mt-0 lg:hidden"
+            className="shrink-0 rounded-lg p-2 text-slate-600 transition hover:bg-[#F3F3F3] lg:hidden"
             onClick={onMenuClick}
           >
             <Menu className="size-5" />
           </button>
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-semibold uppercase tracking-wider text-[#BF120E]">
-                Global Hospitality
-              </span>
-            </div>
-            <h1 className="break-words text-lg font-bold text-[#1B1B1B] sm:text-xl">
-              {title}
-            </h1>
-            {subtitle && <p className="mt-0.5 break-words text-xs text-slate-500">{subtitle}</p>}
-          </div>
+
+          <nav aria-label="Breadcrumb lokasi" className="flex min-w-0 items-center gap-2 text-xs font-medium">
+            <span className="hidden items-center gap-1.5 font-bold uppercase tracking-wider text-[#BF120E] sm:inline-flex">
+              GHS Portal
+            </span>
+            <span className="hidden text-slate-300 sm:inline" aria-hidden="true">
+              /
+            </span>
+            <span className="truncate text-sm font-semibold text-[#102F50]">
+              {currentLocation}
+            </span>
+          </nav>
         </div>
 
-        <div className="flex w-full min-w-0 items-center justify-between gap-2 sm:w-auto sm:shrink-0 sm:justify-end sm:gap-3">
+        {/* Sisi Kanan: User Identity & Action Buttons */}
+        <div className="flex shrink-0 items-center gap-2 sm:gap-3">
           {/* User Identity & Profile Link */}
           <Link
             href="/profile"
             title={email ? `${userName} (${email})` : "Lihat Profil Saya"}
-            className="group flex min-w-0 items-center gap-2.5 rounded-lg p-1.5 transition hover:bg-[#F3F3F3]"
+            className="group flex items-center gap-2.5 rounded-lg p-1.5 transition hover:bg-[#F3F3F3]"
           >
             <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-[#FFD618] text-xs font-bold text-[#1B1B1B] shadow-xs">
               {initials}
             </span>
-            <span className="min-w-0 text-left">
-              <span className="block max-w-32 truncate text-xs font-semibold text-[#1B1B1B] transition group-hover:text-[#BF120E] sm:max-w-40">
+            <span className="hidden text-left sm:block">
+              <span className="block max-w-36 truncate text-xs font-semibold text-[#1B1B1B] transition group-hover:text-[#BF120E] md:max-w-44">
                 {userName}
               </span>
-              <span className="hidden text-[11px] text-slate-500 sm:block">{role}</span>
+              <span className="block text-[11px] text-slate-500">{role}</span>
             </span>
           </Link>
 
+          {/* Vertical Divider */}
+          <div className="h-6 w-px bg-[#EEEEEE]" aria-hidden="true" />
+
           {/* Action Buttons */}
-          <div className="flex items-center gap-1.5 border-l border-[#EEEEEE] pl-2.5">
+          <div className="flex items-center gap-1.5">
             <Link
               href="/profile"
-              className="hidden items-center gap-1.5 rounded-md border border-[#EEEEEE] bg-white px-2.5 py-1.5 text-xs font-medium text-[#1B1B1B] transition hover:bg-[#F3F3F3] md:inline-flex"
+              className="hidden items-center gap-1.5 rounded-lg border border-[#EEEEEE] bg-white px-2.5 py-1.5 text-xs font-medium text-[#1B1B1B] transition hover:bg-[#F3F3F3] md:inline-flex"
             >
               <User className="size-3.5 text-slate-500" />
-              Profil
+              <span>Profil</span>
             </Link>
 
             <button
@@ -123,7 +132,7 @@ export function AppHeader({
                 setLogoutError(null);
                 setShowConfirm(true);
               }}
-              className="inline-flex items-center gap-1.5 rounded-md border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition hover:border-red-200 hover:bg-red-50 hover:text-[#BF120E]"
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-xs font-medium text-slate-700 transition hover:border-red-200 hover:bg-red-50 hover:text-[#BF120E]"
             >
               <LogOut className="size-3.5" />
               <span className="hidden sm:inline">Keluar</span>
@@ -160,11 +169,10 @@ export function AppHeader({
                 </h2>
                 <p
                   id="logout-dialog-message"
-                  className="mt-2 text-sm text-slate-700"
+                  className="mt-2 text-sm text-slate-600"
                 >
                   Apakah Anda yakin ingin keluar dari akun Anda?
                 </p>
-
               </div>
             </div>
 

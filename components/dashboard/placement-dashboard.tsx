@@ -244,11 +244,10 @@ export function PlacementDashboard() {
   ];
 
   return (
-    <div className="mx-auto max-w-375 p-4 sm:p-8">
-      <div className="mb-7">
-        <p className="text-sm text-slate-500">
-          Ringkasan proses karier dan penempatan peserta GHS
-        </p>
+    <div className="mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8">
+      <div className="mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Dashboard Penempatan</h1>
+        <p className="mt-1 text-xs sm:text-sm text-slate-500">Ringkasan proses karier dan penempatan peserta GHS.</p>
       </div>
 
       {dashboardError && (

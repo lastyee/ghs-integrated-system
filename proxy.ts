@@ -42,5 +42,7 @@ export const config = {
     "/placements/:path*",
     "/certificates/:path*",
     "/reports/:path*",
+    "/assignments/:path*",
+    "/audit/:path*",
   ],
 };

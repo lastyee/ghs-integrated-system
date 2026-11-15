@@ -133,9 +133,10 @@ export async function InstructorDashboard() {
   ];
 
   return (
-    <div className="mx-auto max-w-375 p-4 sm:p-8">
-      <div className="mb-7">
-        <p className="text-sm text-slate-500">Data kelas dan jadwal yang ditugaskan kepada akun Anda.</p>
+    <div className="mx-auto max-w-[1500px] p-4 sm:p-6 lg:p-8">
+      <div className="mb-6">
+        <h1 className="text-xl sm:text-2xl font-bold tracking-tight text-slate-900">Dashboard Instruktur</h1>
+        <p className="mt-1 text-xs sm:text-sm text-slate-500">Data kelas dan jadwal yang ditugaskan kepada akun Anda.</p>
       </div>
 
       <section aria-label="Ringkasan instruktur" className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
@@ -162,12 +163,12 @@ export async function InstructorDashboard() {
                 <div key={schedule.id} className="px-5 py-4">
                   <p className="text-sm font-semibold text-[#1B1B1B]">{schedule.subject.name}</p>
                   <p className="mt-1 text-xs text-slate-500">
-                    {schedule.class.name} · {schedule.class.batch.name} · {new Date(schedule.date).toLocaleDateString("id-ID")}
+                    {schedule.class.name} · {schedule.class.batch.name} · {new Date(schedule.date).toLocaleDateString("id-ID", { timeZone: "UTC" })}
                   </p>
                   <p className="mt-1 text-xs text-slate-500">
-                    {new Date(schedule.startTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                    {new Date(schedule.startTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}
                     {" – "}
-                    {new Date(schedule.endTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit" })}
+                    {new Date(schedule.endTime).toLocaleTimeString("id-ID", { hour: "2-digit", minute: "2-digit", timeZone: "UTC" })}
                     {schedule.room ? ` · ${schedule.room}` : ""}
                   </p>
                   <Link href={`/attendance/schedule/${schedule.id}`} className="mt-2 inline-block text-xs font-semibold text-[#BF120E] hover:underline">

@@ -121,14 +121,22 @@ export async function POST(request: Request) {
     // Validate Student exists
     const student = await prisma.student.findFirst({
       where: { id: parsed.data.studentId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!student) {
       return Response.json({ error: "Student not found" }, { status: 404 });
     }
 
+    // Eligibility check: Inactive/dropped students cannot be issued certificates
+    if (student.status === "DROPPED") {
+      return Response.json(
+        { error: "Student status is dropped and not eligible for certificate issuance" },
+        { status: 400 },
+      );
+    }
+
     // Validate Program exists
-    const program = await prisma.program.findUnique({
+    const program = await prisma.program.findFirst({
       where: { id: parsed.data.programId, deletedAt: null },
       select: { id: true },
     });
@@ -137,12 +145,69 @@ export async function POST(request: Request) {
     }
 
     // Validate Batch exists
-    const batch = await prisma.batch.findUnique({
-      where: { id: parsed.data.batchId, deletedAt: null, program: { deletedAt: null } },
-      select: { id: true },
+    const batch = await prisma.batch.findFirst({
+      where: { id: parsed.data.batchId, deletedAt: null },
+      select: { id: true, programId: true },
     });
     if (!batch) {
       return Response.json({ error: "Batch not found" }, { status: 404 });
+    }
+
+    // Validate relationship: Batch must belong to the specified Program
+    if (batch.programId !== program.id) {
+      return Response.json(
+        { error: "Batch does not belong to the selected program" },
+        { status: 400 },
+      );
+    }
+
+    // Validate relationship: Student must have an active Enrollment in the Batch
+    const enrollment = await prisma.enrollment.findFirst({
+      where: {
+        studentId: student.id,
+        batchId: batch.id,
+        deletedAt: null,
+      },
+      select: { id: true, status: true },
+    });
+    if (!enrollment) {
+      return Response.json(
+        { error: "Student is not enrolled in the specified batch" },
+        { status: 400 },
+      );
+    }
+
+    // Eligibility check: Dropped or transferred enrollments are not eligible for certificates
+    if (enrollment.status === "DROPPED") {
+      return Response.json(
+        { error: "Student enrollment is marked as dropped and is not eligible for certificate issuance" },
+        { status: 400 },
+      );
+    }
+
+    if (enrollment.status === "TRANSFERRED") {
+      return Response.json(
+        { error: "Student enrollment is marked as transferred and is not eligible for certificate issuance" },
+        { status: 400 },
+      );
+    }
+
+    // Validate that no active certificate already exists for this student, program, and batch
+    const existingActive = await prisma.certificate.findFirst({
+      where: {
+        studentId: student.id,
+        programId: program.id,
+        batchId: batch.id,
+        status: "ACTIVE",
+        deletedAt: null,
+      },
+      select: { id: true },
+    });
+    if (existingActive) {
+      return Response.json(
+        { error: "An active certificate already exists for this student in the specified batch" },
+        { status: 409 },
+      );
     }
 
     const certificate = await prisma.$transaction(async (tx) => {
@@ -189,8 +254,19 @@ export async function POST(request: Request) {
       error instanceof Prisma.PrismaClientKnownRequestError &&
       error.code === "P2002"
     ) {
+      const target = Array.isArray(error.meta?.target)
+        ? (error.meta?.target as string[]).join(",")
+        : String(error.meta?.target ?? "");
+
+      if (target.includes("certificateNumber")) {
+        return Response.json(
+          { error: "Certificate with this certificateNumber already exists" },
+          { status: 409 },
+        );
+      }
+
       return Response.json(
-        { error: "Certificate with this certificateNumber already exists" },
+        { error: "An active certificate already exists for this student in the specified batch" },
         { status: 409 },
       );
     }

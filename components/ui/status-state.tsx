@@ -11,7 +11,7 @@ export function LoadingState({
 }: StateProps) {
   return (
     <div className="flex items-center gap-3 rounded-xl border border-slate-200 bg-white p-5 text-slate-600">
-      <LoaderCircle className="size-5 animate-spin text-[#123b63]" aria-hidden="true" />
+      <LoaderCircle className="size-5 animate-spin text-[#102F50]" aria-hidden="true" />
       <div>
         <p className="font-semibold text-slate-900">{title}</p>
         <p className="text-sm">{description}</p>
